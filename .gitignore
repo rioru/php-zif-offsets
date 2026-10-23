@@ -1,0 +1,4 @@
+# scratch: downloaded binaries, extracted images, logs
+work/
+# local tooling artifacts
+*.pyc

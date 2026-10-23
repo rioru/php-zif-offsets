@@ -1,0 +1,70 @@
+{
+  "meta": {
+    "php_version": "8.4.27",
+    "thread_safety": "NTS",
+    "arch": "x86_64",
+    "distro": "docker-library/php",
+    "package": "php:8.4-apache",
+    "binary_path": "/usr/lib/apache2/modules/libphp.so",
+    "binary_type": "shared-libphp",
+    "build_id": "3390aa5b732751726ea7ca20ed22c74f36349a2d",
+    "stripped": false,
+    "symbol_source": "readelf -sW (.symtab)",
+    "ps_id_offset_method": "zif_session_id field offsets off ps_globals GOT base: ['0x10', '0x68', '0x15b']",
+    "symbol_names": {
+      "php_session_abort": "php_session_abort.isra.0"
+    },
+    "notes": [
+      "zend_mm_safe_error absent from this build: removed upstream in the php 8.2.35/8.3.36/8.4.27/8.5.12 patch releases (present in earlier 8.x patch releases; zend_mm_panic is the closest equivalent here)"
+    ]
+  },
+  "exploit": {
+    "zval_ptr_dtor": "0x66a620",
+    "zif_system": "0x46ad70",
+    "zif_exec": "0x46ad60",
+    "zif_passthru": "0x46ad80",
+    "zif_shell_exec": "0x46b440",
+    "zend_reference_destroy": "0x66a5c0",
+    "zend_array_destroy": "0x61eee0",
+    "ps_globals": "0x1322940",
+    "php_rfc1867_callback": "0x1338b88",
+    "ps_globals_id_offset": "0x10"
+  },
+  "calibration": {
+    "php_session_initialize": "0x418550",
+    "php_session_reset_id": "0x417350",
+    "php_session_create_id": "0x416920",
+    "ps_open_files": "0x41a8a0",
+    "ps_close_files": "0x41a820",
+    "php_session_abort": "0x414840",
+    "php_rshutdown_session_globals": "0x414a90",
+    "php_session_rfc1867_callback": "0x419ec0",
+    "php_url_encode": "0x4c32d0",
+    "sapi_add_header_ex": "0x5134e0",
+    "sapi_header_op": "0x512ce0",
+    "zend_llist_destroy": "0x64c1b0",
+    "zend_mm_gc": "0x570fb0",
+    "zend_mm_free_pages": "0x570a70",
+    "zend_mm_alloc_pages": "0x5715a0",
+    "zend_mm_shutdown": "0x572450",
+    "_efree": "0x575500",
+    "_emalloc": "0x5753e0",
+    "_erealloc": "0x5755e0",
+    "zend_mm_safe_error": null,
+    "zend_mm_panic": "0x18f4e4",
+    "rfc1867_post_handler": "0x50fa10",
+    "php_hash_environment": "0x50ee90",
+    "php_request_startup": "0x503f80",
+    "php_request_shutdown": "0x504220",
+    "alloc_globals": "0x1339168",
+    "sapi_globals": "0x1338cc0",
+    "executor_globals": "0x1339460",
+    "core_globals": "0x1338720",
+    "compiler_globals": "0x1339c20",
+    "sapi_module": "0x1338ba0"
+  },
+  "fingerprint": {
+    "zval_ptr_dtor_mod_0x1000": "0x620",
+    "zif_system_mod_0x1000": "0xd70"
+  }
+}

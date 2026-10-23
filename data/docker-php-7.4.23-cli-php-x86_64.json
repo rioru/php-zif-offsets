@@ -1,0 +1,69 @@
+{
+  "meta": {
+    "php_version": "7.4.23",
+    "thread_safety": "NTS",
+    "arch": "x86_64",
+    "distro": "docker-library/php",
+    "package": "php:7.4.23-cli",
+    "binary_path": "/usr/local/bin/php",
+    "binary_type": "static-pie",
+    "build_id": "dc5e7f1d3c202f380dce17d2f72ce2707c73478f",
+    "stripped": false,
+    "symbol_source": "readelf -sW (.symtab)",
+    "ps_id_offset_method": "objdump <ps_globals+off> annotations: ['0x0', '0x4', '0x8', '0x10', '0x18', '0x20', '0x28', '0x2c', '0x2d', '0x30', '0x38', '0x40', '0x41', '0x48', '0x50', '0x58', '0x60', '0x68', '0x70', '0x78', '0x80', '0x88', '0x90', '0x98', '0xa0', '0xa8', '0xb8', '0xc8', '0xd8', '0xe8', '0xf8', '0xf9', '0x100', '0x108', '0x110', '0x118', '0x120', '0x128', '0x12c', '0x130', '0x138', '0x140', '0x148', '0x149', '0x14a', '0x14b', '0x150', '0x158', '0x160', '0x164', '0x168', '0x170', '0x188', '0x190', '0x198', '0x199', '0x19a', '0x19b', '0x1a0', '0x360']",
+    "symbol_names": {
+      "php_session_abort": "php_session_abort.isra.0",
+      "zend_mm_panic": "zend_mm_panic.constprop.0"
+    },
+    "notes": null
+  },
+  "exploit": {
+    "zval_ptr_dtor": "0x507f80",
+    "zif_system": "0x425da0",
+    "zif_exec": "0x425d90",
+    "zif_passthru": "0x425db0",
+    "zif_shell_exec": "0x426410",
+    "zend_reference_destroy": "0x507f20",
+    "zend_array_destroy": "0x519b90",
+    "ps_globals": "0x12094e0",
+    "php_rfc1867_callback": "0x1220e48",
+    "ps_globals_id_offset": "0x10"
+  },
+  "calibration": {
+    "php_session_initialize": "0x3d92a0",
+    "php_session_reset_id": "0x3d8500",
+    "php_session_create_id": "0x3d7c10",
+    "ps_open_files": "0x3db2b0",
+    "ps_close_files": "0x3db250",
+    "php_session_abort": "0x3d6300",
+    "php_rshutdown_session_globals": "0x3d3f40",
+    "php_session_rfc1867_callback": "0x3da4b0",
+    "php_url_encode": "0x45aa00",
+    "sapi_add_header_ex": "0x4b1e10",
+    "sapi_header_op": "0x4b1510",
+    "zend_llist_destroy": "0x4fd490",
+    "zend_mm_gc": "0x4e0490",
+    "zend_mm_free_pages": "0x4e00d0",
+    "zend_mm_alloc_pages": "0x4e0990",
+    "zend_mm_shutdown": "0x4e15c0",
+    "_efree": "0x4e3d30",
+    "_emalloc": "0x4e3c90",
+    "_erealloc": "0x4e3e10",
+    "zend_mm_safe_error": "0x22710c",
+    "zend_mm_panic": "0x2271ed",
+    "rfc1867_post_handler": "0x4b33f0",
+    "php_hash_environment": "0x4b8560",
+    "php_request_startup": "0x4a7da0",
+    "php_request_shutdown": "0x4a8020",
+    "alloc_globals": "0x1221198",
+    "sapi_globals": "0x1220c20",
+    "executor_globals": "0x12211a0",
+    "core_globals": "0x1220720",
+    "compiler_globals": "0x1221820",
+    "sapi_module": "0x1220b00"
+  },
+  "fingerprint": {
+    "zval_ptr_dtor_mod_0x1000": "0xf80",
+    "zif_system_mod_0x1000": "0xda0"
+  }
+}

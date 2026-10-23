@@ -1,0 +1,75 @@
+{
+  "meta": {
+    "php_version": "5.4.32",
+    "thread_safety": "ZTS",
+    "arch": "x86_64",
+    "distro": "docker-library/php",
+    "package": "php:5.4.32-apache",
+    "binary_path": "/usr/local/apache2/modules/libphp5.so",
+    "binary_type": "shared-libphp",
+    "build_id": "538dae1f481ec482a44381ac20a08b03307831ef",
+    "stripped": false,
+    "symbol_source": "readelf -sW (.symtab)",
+    "ps_id_offset_method": "zif_session_id field offsets off ps_globals GOT base: ['0x0', '0x8', '0x10']",
+    "symbol_names": {
+      "zval_ptr_dtor": "_zval_ptr_dtor",
+      "zend_mm_panic": "zend_mm_panic.constprop.4"
+    },
+    "notes": [
+      "zval_ptr_dtor present as _zval_ptr_dtor (php < 7.3 naming; value recorded under the canonical key)",
+      "alloc_globals recovery failed: ambiguous candidates: {}",
+      "MISSING Tier A: zend_reference_destroy, zend_array_destroy, ps_globals",
+      "ZTS build auto-detected from tsrm_* symbols; thread_safety corrected from the driver meta (NTS)",
+      "ZTS build: executor_globals/ps_globals are thread-local via TSRM (no direct symbols, hence the nulls); TSRM key globals: executor_globals_id=0xae5e80, ps_globals_id=0xae3b80"
+    ]
+  },
+  "exploit": {
+    "zval_ptr_dtor": "0x387170",
+    "zif_system": "0x2a43a0",
+    "zif_exec": "0x2a4390",
+    "zif_passthru": "0x2a43b0",
+    "zif_shell_exec": "0x2a48e0",
+    "zend_reference_destroy": null,
+    "zend_array_destroy": null,
+    "ps_globals": null,
+    "php_rfc1867_callback": "0xae2118",
+    "ps_globals_id_offset": "0x10"
+  },
+  "calibration": {
+    "php_session_initialize": "0x252c20",
+    "php_session_reset_id": "0x253090",
+    "php_session_create_id": "0x256540",
+    "ps_open_files": "0x258570",
+    "ps_close_files": "0x258520",
+    "php_session_abort": null,
+    "php_rshutdown_session_globals": "0x250ea0",
+    "php_session_rfc1867_callback": "0x257ad0",
+    "php_url_encode": "0x2d25a0",
+    "sapi_add_header_ex": "0x3357d0",
+    "sapi_header_op": "0x335000",
+    "zend_llist_destroy": "0x38c2e0",
+    "zend_mm_gc": null,
+    "zend_mm_free_pages": null,
+    "zend_mm_alloc_pages": null,
+    "zend_mm_shutdown": "0x36ebd0",
+    "_efree": "0x36f050",
+    "_emalloc": "0x36f010",
+    "_erealloc": "0x36f090",
+    "zend_mm_safe_error": "0x36c9a0",
+    "zend_mm_panic": "0x36be10",
+    "rfc1867_post_handler": "0x336dd0",
+    "php_hash_environment": "0x33c2a0",
+    "php_request_startup": "0x32ae20",
+    "php_request_shutdown": "0x32b520",
+    "alloc_globals": null,
+    "sapi_globals": null,
+    "executor_globals": null,
+    "core_globals": null,
+    "compiler_globals": null,
+    "sapi_module": "0xae5d00"
+  },
+  "fingerprint": {
+    "zval_ptr_dtor_mod_0x1000": "0x170",
+    "zif_system_mod_0x1000": "0x3a0"
+  }
+}
