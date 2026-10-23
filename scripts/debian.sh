@@ -14,9 +14,14 @@
 # Requires: curl, ar, tar (xz/zstd), readelf, python3, jq.
 set -uo pipefail
 cd "$(dirname "$0")/.."
-WORK=work/debian
-ARCH="${ARCH:-x86_64}"   # ELF arch in meta + row filename (aarch64 later)
-DEBUG=work/debuginfo
+ARCH="${ARCH:-x86_64}"
+case "$ARCH" in
+  x86_64)  DEB_ARCH=amd64 ;;
+  aarch64) DEB_ARCH=arm64 ;;
+  *) echo "ERROR: unsupported ARCH=$ARCH (x86_64|aarch64)" >&2; exit 1 ;;
+esac
+WORK=work/debian-${ARCH}
+DEBUG=work/debuginfo-${ARCH}
 mkdir -p "$WORK" "$DEBUG" data
 FAILURES=()
 
@@ -61,11 +66,11 @@ for row in "${ROWS[@]}"; do
     *)              host="https://deb.debian.org" ;;
   esac
   for pkg in "libapache2-mod-php${php}" "php${php}-fpm" "php${php}-cgi"; do
-    deb="$WORK/${pkg}_${dver}_amd64.deb"
-    dbgdeb="$WORK/${pkg}-dbgsym_${dver}_amd64.deb"
-    fetch "${host}/debian/pool/main/p/php${php}/${pkg}_${dver}_amd64.deb" "$deb" ||
+    deb="$WORK/${pkg}_${dver}_${DEB_ARCH}.deb"
+    dbgdeb="$WORK/${pkg}-dbgsym_${dver}_${DEB_ARCH}.deb"
+    fetch "${host}/debian/pool/main/p/php${php}/${pkg}_${dver}_${DEB_ARCH}.deb" "$deb" ||
       { FAILURES+=("$pkg"); continue; }
-    fetch "${host}/debian-debug/pool/main/p/php${php}/${pkg}-dbgsym_${dver}_amd64.deb" "$dbgdeb" ||
+    fetch "${host}/debian-debug/pool/main/p/php${php}/${pkg}-dbgsym_${dver}_${DEB_ARCH}.deb" "$dbgdeb" ||
       { FAILURES+=("$pkg"); continue; }
 
     xdir="$WORK/extract/${pkg}"

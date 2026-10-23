@@ -1,0 +1,68 @@
+{
+  "meta": {
+    "php_version": "8.5.5",
+    "thread_safety": "NTS",
+    "arch": "aarch64",
+    "distro": "docker-library/php",
+    "package": "php:8.5.5-apache",
+    "binary_path": "/usr/lib/apache2/modules/libphp.so",
+    "binary_type": "shared-libphp",
+    "build_id": "16655679cec80c06c17818012a0a1ca5f7507846",
+    "stripped": false,
+    "symbol_source": "readelf -sW (.symtab)",
+    "ps_id_offset_method": "zif_session_id field offsets off ps_globals base: ['0x10']",
+    "symbol_names": {
+      "php_session_abort": "php_session_abort.isra.0"
+    },
+    "notes": null
+  },
+  "exploit": {
+    "zval_ptr_dtor": "0x735f60",
+    "zif_system": "0x5049b0",
+    "zif_exec": "0x5049a8",
+    "zif_passthru": "0x5049c0",
+    "zif_shell_exec": "0x5051e0",
+    "zend_reference_destroy": "0x735ee0",
+    "zend_array_destroy": "0x6ec300",
+    "ps_globals": "0x172ed50",
+    "php_rfc1867_callback": "0x1745048",
+    "ps_globals_id_offset": "0x10"
+  },
+  "calibration": {
+    "php_session_initialize": "0x4aa368",
+    "php_session_reset_id": "0x4a954c",
+    "php_session_create_id": "0x4a88cc",
+    "ps_open_files": "0x4ad810",
+    "ps_close_files": "0x4ad760",
+    "php_session_abort": "0x4a3ce4",
+    "php_rshutdown_session_globals": "0x4a3eb0",
+    "php_session_rfc1867_callback": "0x4abf6c",
+    "php_url_encode": "0x55de80",
+    "sapi_add_header_ex": "0x5ccaa0",
+    "sapi_header_op": "0x5cc400",
+    "zend_llist_destroy": "0x717950",
+    "zend_mm_gc": "0x625da0",
+    "zend_mm_free_pages": "0x6256a0",
+    "zend_mm_alloc_pages": "0x626320",
+    "zend_mm_shutdown": "0x627140",
+    "_efree": "0x62a260",
+    "_emalloc": "0x62a148",
+    "_erealloc": "0x62a344",
+    "zend_mm_safe_error": "0x1818f0",
+    "zend_mm_panic": "0x1818c8",
+    "rfc1867_post_handler": "0x5c9a84",
+    "php_hash_environment": "0x5c8f30",
+    "php_request_startup": "0x5bc66c",
+    "php_request_shutdown": "0x5bc8c0",
+    "alloc_globals": "0x17455d8",
+    "sapi_globals": "0x1745170",
+    "executor_globals": "0x1745888",
+    "core_globals": "0x1744c10",
+    "compiler_globals": "0x1746048",
+    "sapi_module": "0x1745050"
+  },
+  "fingerprint": {
+    "zval_ptr_dtor_mod_0x1000": "0xf60",
+    "zif_system_mod_0x1000": "0x9b0"
+  }
+}

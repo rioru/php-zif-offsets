@@ -3,9 +3,9 @@
 # via the Launchpad publishing API - binaries only, no -dbgsym download.
 #
 # The stripped binaries are processed with the no-debug-info pipeline
-# (dynsym exports + R_X86_64_RELATIVE relocation scan + pointer scan +
-# GOT disassembly), and the local/static-symbol gaps are recovered by
-# masked pattern matching against work/refs/ubuntu-<suite>-<sapi>.merged
+# (dynsym exports + R_*_RELATIVE relocation scan + pointer scan +
+# GOT/ADRP disassembly), and the local/static-symbol gaps are recovered by
+# masked pattern matching against work/refs/ubuntu-<suite>-<sapi>-<ARCH>.merged
 # (the CURRENT version's binary + its ddeb symtab fused with eu-unstrip;
 # built by scripts/build_refs.sh). Pattern hits are call-annotation
 # verified; unverified symbols stay null with a note.
@@ -14,17 +14,23 @@
 #   getPublishedSources?source_name=<src>&distro_series=<series>  ->
 #   every source publication ever (paged, 75/page) -> dedupe by
 #   version, skip Proposed-only -> <sourcepub>?ws.op=binaryFileUrls ->
-#   every binary file of that publication -> filter amd64 .deb.
+#   every binary file of that publication -> filter the ARCH .deb.
 #
 # Requires: curl, ar, tar (xz/zstd), readelf, python3, jq.
 set -uo pipefail
 cd "$(dirname "$0")/.."
-WORK=work/ubuntu-archive
 ARCH="${ARCH:-x86_64}"
+case "$ARCH" in
+  x86_64)  DEB_ARCH=amd64 ;;
+  aarch64) DEB_ARCH=arm64 ;;
+  *) echo "ERROR: unsupported ARCH=$ARCH (x86_64|aarch64)" >&2; exit 1 ;;
+esac
+WORK=work/ubuntu-archive-${ARCH}
+PUBS=work/launchpad-pubs   # shared publishing-API cache (arch-independent)
 REFS=work/refs
 LOG=work/logs/ubuntu-archive.log
 API="https://api.launchpad.net/1.0"
-mkdir -p "$WORK" data work/logs
+mkdir -p "$WORK" "$PUBS" data work/logs
 FAILURES=()
 
 # suite|php XY
@@ -64,7 +70,7 @@ for row in "${SUITES[@]}"; do
 
   # page through every source publication of this source package in
   # this suite; keep the first sourcepub per version (skip Proposed)
-  pubs="$WORK/${src}-${suite}-pubs.tsv"
+  pubs="$PUBS/${src}-${suite}-pubs.tsv"
   {
     url="${API}/ubuntu/+archive/primary?ws.op=getPublishedSources&source_name=${src}&exact_match=true&distro_series=${API}/ubuntu/${suite}"
     while [ -n "$url" ]; do
@@ -89,12 +95,12 @@ for row in "${SUITES[@]}"; do
       out_json="data/ubuntu-${suite}-php-${v}-${sapi}-${bname}-${ARCH}.json"
       [ -f "$out_json" ] && continue
 
-      # every binary file of this source publication; keep the amd64 deb
+      # every binary file of this source publication; keep the ARCH deb
       deb_url=$(curl -fsSL --max-time 120 "${publink}?ws.op=binaryFileUrls" |
-        jq -r '.[]' | grep -E "/${pkg}_[^/]*_amd64\.deb$" | head -1)
-      [ -n "$deb_url" ] || { echo "  no amd64 deb for $pkg $v" | tee -a "$LOG"; continue; }
+        jq -r '.[]' | grep -E "/${pkg}_[^/]*_${DEB_ARCH}\.deb$" | head -1)
+      [ -n "$deb_url" ] || { echo "  no ${DEB_ARCH} deb for $pkg $v" | tee -a "$LOG"; continue; }
 
-      deb="$WORK/${pkg}_${v}_amd64.deb"
+      deb="$WORK/${pkg}_${v}_${DEB_ARCH}.deb"
       fetch "$deb_url" "$deb" || { FAILURES+=("$pkg $v"); continue; }
       xdir="$WORK/extract/${pkg}_${v}"
       [ -d "$xdir/usr" ] || extract_deb "$deb" "$xdir" || { FAILURES+=("$pkg $v"); continue; }
@@ -106,7 +112,7 @@ for row in "${SUITES[@]}"; do
       esac
       [ -f "$bin" ] || { echo "ERROR: binary not found: $bin" >&2; FAILURES+=("$pkg $v"); continue; }
 
-      ref="$REFS/ubuntu-${suite}-${sapi}.merged"
+      ref="$REFS/ubuntu-${suite}-${sapi}-${ARCH}.merged"
       meta=$(jq -nc --arg pv "$upver" --arg pkg "${pkg}_${v}" --arg bp "$bp" --arg bt "$bt" \
         --arg distro "ubuntu-${suite}" --arg arch "$ARCH" \
         '{php_version:$pv, thread_safety:"NTS", arch:$arch, distro:$distro,

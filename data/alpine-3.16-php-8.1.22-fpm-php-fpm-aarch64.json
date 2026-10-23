@@ -1,0 +1,73 @@
+{
+  "meta": {
+    "php_version": "8.1.22",
+    "thread_safety": "NTS",
+    "arch": "aarch64",
+    "distro": "alpine-3.16",
+    "package": "php81-fpm-8.1.22-r0",
+    "binary_path": "/usr/sbin/php-fpm81",
+    "binary_type": "static-pie",
+    "build_id": null,
+    "stripped": true,
+    "symbol_source": "readelf --dyn-syms + debug-file symtab (php-fpm81.debug, +8902 symbols)",
+    "ps_id_offset_method": null,
+    "symbol_names": {
+      "zend_mm_panic": "zend_mm_panic.constprop.0"
+    },
+    "notes": [
+      "Alpine builds the session extension as a shared module (php81-session apk): ps_globals and the php_session_* symbols are NOT in this binary - see the matching session.so row",
+      "packages on this alpine branch ship no .note.gnu.build-id: build_id is null; binary/debug pairing is guaranteed by the mirrored-path layout of the php81-dbg apk",
+      "ps_globals_id_offset recovery failed: no ps_globals-relative accesses found by the aarch64 ADRP/LDR scan (ps_globals itself missing)",
+      "MISSING Tier A: ps_globals"
+    ]
+  },
+  "exploit": {
+    "zval_ptr_dtor": "0x28ca40",
+    "zif_system": "0x1c3270",
+    "zif_exec": "0x1c3260",
+    "zif_passthru": "0x1c3280",
+    "zif_shell_exec": "0x1c3bf0",
+    "zend_reference_destroy": "0x28c9c0",
+    "zend_array_destroy": "0x2a24e0",
+    "ps_globals": null,
+    "php_rfc1867_callback": "0x558838",
+    "ps_globals_id_offset": null
+  },
+  "calibration": {
+    "php_session_initialize": null,
+    "php_session_reset_id": null,
+    "php_session_create_id": null,
+    "ps_open_files": null,
+    "ps_close_files": null,
+    "php_session_abort": null,
+    "php_rshutdown_session_globals": null,
+    "php_session_rfc1867_callback": null,
+    "php_url_encode": "0x1fdcd0",
+    "sapi_add_header_ex": "0x230ba0",
+    "sapi_header_op": "0x230480",
+    "zend_llist_destroy": "0x2816e0",
+    "zend_mm_gc": "0x2605a4",
+    "zend_mm_free_pages": "0x260214",
+    "zend_mm_alloc_pages": "0x260a00",
+    "zend_mm_shutdown": "0x261580",
+    "_efree": "0x263ac0",
+    "_emalloc": "0x263a14",
+    "_erealloc": "0x263b80",
+    "zend_mm_safe_error": "0xd4b7c",
+    "zend_mm_panic": "0xd4c3c",
+    "rfc1867_post_handler": "0x232294",
+    "php_hash_environment": "0x2362b4",
+    "php_request_startup": "0x227610",
+    "php_request_shutdown": "0x227884",
+    "alloc_globals": "0x558b48",
+    "sapi_globals": "0x558610",
+    "executor_globals": "0x558b58",
+    "core_globals": "0x558188",
+    "compiler_globals": "0x559230",
+    "sapi_module": "0x5584f8"
+  },
+  "fingerprint": {
+    "zval_ptr_dtor_mod_0x1000": "0xa40",
+    "zif_system_mod_0x1000": "0x270"
+  }
+}

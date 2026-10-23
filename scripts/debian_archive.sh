@@ -3,11 +3,11 @@
 # from snapshot.debian.org - binaries only, no -dbgsym download.
 #
 # The stripped binaries are processed with the no-debug-info pipeline
-# (dynsym exports + R_X86_64_RELATIVE relocation scan + pointer scan +
-# GOT disassembly), and the local/static-symbol gaps (zend_reference_
+# (dynsym exports + R_*_RELATIVE relocation scan + pointer scan +
+# GOT/ADRP disassembly), and the local/static-symbol gaps (zend_reference_
 # destroy, php_session_*, ps_*, zend_mm_*) are recovered by masked
 # pattern matching against a merged reference build of the same suite:
-# work/refs/debian-<suite>-<sapi>.merged is the CURRENT version's
+# work/refs/debian-<suite>-<sapi>-<ARCH>.merged is the CURRENT version's
 # binary + its -dbgsym symtab fused with eu-unstrip (built by
 # scripts/build_refs.sh). Pattern hits are call-annotation verified;
 # unverified symbols stay null with a note.
@@ -16,8 +16,8 @@
 # untagged versions map to the single suite that shipped that
 # major.minor (7.0->stretch, 7.3->buster, 7.4->bullseye, 8.2->bookworm,
 # 8.4->trixie). Caveat: a few untagged versions may have only lived in
-# unstable/testing; the row is still the real Debian amd64 build of
-# that version.
+# unstable/testing; the row is still the real Debian build of that
+# version for the requested ARCH (x86_64 default, aarch64 supported).
 #
 # snapshot.debian.org machine-readable API: only the list endpoints are
 # enabled; per-version file URLs come from the HTML package page
@@ -26,11 +26,17 @@
 # Requires: curl, ar, tar (xz/zstd), readelf, python3, jq.
 set -uo pipefail
 cd "$(dirname "$0")/.."
-WORK=work/debian-archive
 ARCH="${ARCH:-x86_64}"
+case "$ARCH" in
+  x86_64)  DEB_ARCH=amd64 ;;
+  aarch64) DEB_ARCH=arm64 ;;
+  *) echo "ERROR: unsupported ARCH=$ARCH (x86_64|aarch64)" >&2; exit 1 ;;
+esac
+WORK=work/debian-archive-${ARCH}
+PAGES=work/snapshot-pages   # shared per-version HTML cache (arch-independent)
 REFS=work/refs
 LOG=work/logs/debian-archive.log
-mkdir -p "$WORK" data work/logs
+mkdir -p "$WORK" "$PAGES" data work/logs
 FAILURES=()
 
 # suite|php XY|suite tag N
@@ -93,16 +99,16 @@ for row in "${SUITES[@]}"; do
       [ -f "$out_json" ] && continue
 
       # per-version HTML page -> archive URLs for this binary
-      page="$WORK/page-${src}-${v}.html"
+      page="$PAGES/page-${src}-${v}.html"
       fetch "https://snapshot.debian.org/package/${src}/${v}/" "$page" || { FAILURES+=("$src $v $sapi"); continue; }
       # the href version token is percent-encoded; anchor on the binary
       # name and take every archive copy, debian/debian-security first
       urls=$(grep -oE 'href="/archive/(debian|debian-security)/[^"]*"' \
         "$page" | sed 's/^href="//;s/"$//' |
-        grep -E "/${pkg}_[^/]*_amd64\.deb$" | head -3)
-      [ -n "$urls" ] || { echo "  no amd64 deb for $pkg $v on the snapshot page" | tee -a "$LOG"; continue; }
+        grep -E "/${pkg}_[^/]*_${DEB_ARCH}\.deb$" | head -3)
+      [ -n "$urls" ] || { echo "  no ${DEB_ARCH} deb for $pkg $v on the snapshot page" | tee -a "$LOG"; continue; }
 
-      deb="$WORK/${pkg}_${v}_amd64.deb"
+      deb="$WORK/${pkg}_${v}_${DEB_ARCH}.deb"
       ok=0
       while IFS= read -r u; do
         fetch "https://snapshot.debian.org${u}" "$deb" && { ok=1; break; }
@@ -121,7 +127,7 @@ for row in "${SUITES[@]}"; do
       esac
       [ -f "$bin" ] || { echo "ERROR: binary not found: $bin" >&2; FAILURES+=("$pkg $v"); continue; }
 
-      ref="$REFS/debian-${suite}-${sapi}.merged"
+      ref="$REFS/debian-${suite}-${sapi}-${ARCH}.merged"
       meta=$(jq -nc --arg pv "$upver" --arg pkg "${pkg}_${v}" --arg bp "$bp" --arg bt "$bt" \
         --arg distro "debian-${suite}" --arg arch "$ARCH" \
         '{php_version:$pv, thread_safety:"NTS", arch:$arch, distro:$distro,

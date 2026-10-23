@@ -97,7 +97,11 @@ compiler_globals, sapi_module.
      equal to zif_system's vaddr.
   4. Sanity-check: the handler must land inside .text and arg_info inside
      .data.rel.ro.
-  The same trick recovers any zif_* fallback.
+  The same trick recovers any zif_* fallback. On aarch64 the relocation
+  type is R_AARCH64_RELATIVE (same addend semantics); RELR-packed builds
+  (Fedora fc41+, `-z pack-relative-relocs`) carry no RELA entries at all,
+  so the trick reads the in-file slot values instead (the link-time
+  vaddr is stored at the relocation target).
 
 ## Output format
 

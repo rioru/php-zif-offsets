@@ -21,26 +21,27 @@ different offsets and are never merged.
 
 Row filenames end with the ELF architecture, e.g.
 `docker-php-8.3.35-apache-libphp-x86_64.json`, and `meta.arch` records it
-too; an aarch64 pass can therefore add rows without filename collisions
-(the writer scripts take `ARCH=aarch64`, but platform-aware image pulls
-are not implemented yet).
+too. Both x86_64 and aarch64 are covered: every writer script takes
+`ARCH=x86_64|aarch64` (x86_64 by default), and the docker sweep pins the
+per-architecture manifest digest when pulling multi-arch images (see
+Caveats).
 
-| family | rows | builds |
-|---|---|---|
-| docker-library/php | 1,256 | every tag Docker Hub still serves: 5.3.29-8.5.12, 422 versions (apache/fpm/cli; not every SAPI exists for every tag) |
-| debian (snapshot.debian.org) | 750 | stretch 7.0, buster 7.3, bullseye 7.4, bookworm 8.2, trixie 8.4 — every archived source version incl. security uploads (apache/fpm/cgi) |
-| ubuntu (Launchpad) | 284 | xenial 7.0, bionic 7.2, focal 7.4, jammy 8.1, noble 8.3 — every published update build (apache/fpm) |
-| fedora (koji) | 742 | fc28-fc43, php 7.2-8.5 — every binary build (cli/fpm) |
-| remi (el8/el9) | 13 | 7.4.33-8.5.12 (fpm) |
-| rocky (8/9 AppStream) | 9 | rocky-8 7.2.24-8.2.35, rocky-9 8.0.30-8.3.36 (fpm) |
-| alpine (3.16/3.18/3.22) | 11 | php81/82/83/84: fpm + apache mod_php + session.so rows |
+| family | x86_64 rows | aarch64 rows | builds |
+|---|---|---|---|
+| docker-library/php | 1,256 | 963 | every tag Docker Hub still serves: 5.3.29-8.5.12, 422 versions (apache/fpm/cli; not every SAPI exists for every tag; arm64 images exist from 5.6.31) |
+| debian (snapshot.debian.org) | 750 | 741 | stretch 7.0, buster 7.3, bullseye 7.4, bookworm 8.2, trixie 8.4 — every archived source version incl. security uploads (apache/fpm/cgi) |
+| ubuntu (Launchpad) | 284 | 284 | xenial 7.0, bionic 7.2, focal 7.4, jammy 8.1, noble 8.3 — every published update build (apache/fpm) |
+| fedora (koji) | 742 | 742 | fc28-fc43, php 7.2-8.5 — every binary build (cli/fpm) |
+| remi (el8/el9) | 13 | 13 | 7.4.33-8.5.12 (fpm) |
+| rocky (8/9 AppStream) | 9 | 9 | rocky-8 7.2.24-8.2.35, rocky-9 8.0.30-8.3.36 (fpm) |
+| alpine (3.16/3.18/3.22) | 11 | 11 | php81/82/83/84: fpm + apache mod_php + session.so rows |
 
-Total: 3,065 rows. Archive rows (debian/ubuntu/fedora sweeps) are
-**binaries-only**: no debug package is downloaded per row — local symbols
-are recovered by masked pattern match against a merged reference build
-(see Method). Rows carry the full package version string in the
-filename (e.g. `7.4.3-4ubuntu2.28`, `8.4.27-2.fc43`) because archive
-backports share upstream versions.
+Total: 5,828 rows (3,065 x86_64 + 2,763 aarch64). Archive rows
+(debian/ubuntu/fedora sweeps) are **binaries-only**: no debug package is
+downloaded per row — local symbols are recovered by masked pattern match
+against a merged reference build (see Method). Rows carry the full
+package version string in the filename (e.g. `7.4.3-4ubuntu2.28`,
+`8.4.27-2.fc43`) because archive backports share upstream versions.
 
 Binary types: `static-pie` executables (php-fpm, php cli/cgi), `shared-libphp`
 (libphp.so / mod_php.so), and `shared-ext` (Alpine session.so).
@@ -114,6 +115,25 @@ produced the value:
    (`php_ps_globals` struct tag), with annotation- and disassembly-based
    fallbacks.
 
+aarch64 rows use the same ladder with arch-specific decoders (disassembly
+via `llvm-objdump`; the host GNU objdump has no aarch64 support):
+
+- the `zif_*` relocation trick reads `R_AARCH64_RELATIVE` addends, and in
+  RELR-packed builds (Fedora fc41+, `-z pack-relative-relocs`) the in-file
+  slot values, which are the link-time vaddrs;
+- `zend_reference_destroy` / `zend_array_destroy` on stripped builds are
+  recovered from `rc_dtor_func`'s 16-entry function-pointer dispatch table
+  (index = zval type & 0xf; entry 7 is `zend_array_destroy`, entry 10 is
+  `zend_reference_destroy`) — the entries are `R_AARCH64_RELATIVE` addends
+  or, in RELR builds, plain in-file vaddrs;
+- `ps_globals_id_offset` comes from an ADRP/ADD/LDR register-state machine
+  over `zif_session_id` (or whole `.text` when the symbol is stripped): a
+  register holding an ADRP page base is promoted to the `ps_globals` base
+  when an ADD computes its vaddr or a load hits a `ps_globals` GOT slot,
+  and every load/store off that base records a field offset. This handles
+  the compiler reusing and re-establishing the base register mid-function,
+  and GOT slots in RELR-packed binaries.
+
 ## Regeneration
 
 Each distro family has one driver script; each downloads its packages into
@@ -139,7 +159,9 @@ python3 scripts/audit.py            # dataset audit: zero unexplained nulls expe
 ```
 
 All sweep scripts are resumable (existing `data/` rows are skipped) and
-cache downloads under `work/` (gitignored).
+cache downloads under `work/` (gitignored). Every writer script takes
+`ARCH=x86_64|aarch64` (x86_64 by default) and regenerates that arch's
+rows; run each script once per arch for full coverage.
 
 Requirements: `curl`, `ar`/`tar`/`zstd`/`bsdtar`, `rpm2cpio`/`cpio`,
 `readelf`, `pahole`, `jq`, `python3`; `docker` for the docker family only.
@@ -183,16 +205,32 @@ packages; no lab or live system is contacted.
   a documented recovery failure (extractor note), or best-effort
   (`zend_mm_safe_error`, static and usually inlined) — the audit exits
   non-zero on anything else and currently passes clean.
+- **aarch64 availability windows.** arm64 packages exist only from the
+  mid-2010s distro releases: Docker Hub arm64 php images start at 5.6.31
+  (5.4/5.5 are amd64-only), Debian arm64 ports start at stretch, Fedora
+  aarch64 at fc28, Ubuntu at xenial. A handful of archive versions are
+  arm64-less (or amd64-less) on their snapshot pages; those gaps are
+  version-legit in the audit.
+- **Docker multi-arch pulls.** `docker pull --platform` matches the local
+  image store by manifest digest, not platform: on a host that already
+  runs amd64 php containers, a tag whose index digest is cached silently
+  returns the amd64 image for an arm64 request. The docker sweep therefore
+  resolves the per-arch manifest digest (`docker manifest inspect
+  --verbose`) and pulls `ref@sha256:<digest>`, and validates the ELF
+  machine of every extracted binary before writing a row.
+- **RELR-packed relocations.** Fedora fc41+ links with `-z
+  pack-relative-relocs`: `.rela.dyn` carries no `R_AARCH64_RELATIVE`
+  entries, and relocated pointers (GOT slots, jump tables) hold their
+  link-time values in-file. The aarch64 decoders read those values
+  directly where RELA addends would otherwise be used.
 - **Fingerprint collisions.** `zval_ptr_dtor mod 0x1000` is not unique across
   builds; every colliding pair is flagged in COLLISIONS.md (including two
-  fully interchangeable rocky-9/remi-el9 pairs).
+  fully interchangeable rocky-9/remi-el9 pairs). Collisions are only
+  meaningful within one architecture — the generator pairs rows of the
+  same `meta.arch` only.
 
 ## Future work
 
-- **aarch64 pass.** Row filenames and `meta.arch` already carry the arch,
-  and the writer scripts take `ARCH=aarch64`; what is missing is
-  platform-aware package pulls (docker `--platform linux/arm64`,
-  deb/rpm `_aarch64`/`aarch64` URLs) and aarch64 merged references.
 - **pre-fc28 Fedora.** koji carries php builds back to 5.1.6, but
   before fc28 the subpackage split differs (the CLI binary ships in the
   `php` RPM, mod_php exists) and debuginfo availability is uncertain.

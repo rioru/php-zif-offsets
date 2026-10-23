@@ -13,9 +13,14 @@
 # Requires: curl, rpm2cpio, cpio, readelf, python3, jq.
 set -uo pipefail
 cd "$(dirname "$0")/.."
-WORK=work/fedora
-ARCH="${ARCH:-x86_64}"   # ELF arch in meta + row filename (aarch64 later)
-DEBUG=work/debuginfo
+ARCH="${ARCH:-x86_64}"
+case "$ARCH" in
+  x86_64)  RPM_ARCH=x86_64 ;;
+  aarch64) RPM_ARCH=aarch64 ;;
+  *) echo "ERROR: unsupported ARCH=$ARCH (x86_64|aarch64)" >&2; exit 1 ;;
+esac
+WORK=work/fedora-${ARCH}
+DEBUG=work/debuginfo-${ARCH}
 mkdir -p "$WORK" "$DEBUG" data
 FAILURES=()
 
@@ -47,12 +52,12 @@ build_id_of() { readelf -n "$1" | sed -nE 's/.*Build ID: ([0-9a-f]+).*/\1/p' | h
 for row in "${ROWS[@]}"; do
   IFS='|' read -r distro phpver rel binrel bp bt suffix bname <<<"$row"
   case $bname in
-    php-fpm) pkg_rpm="php-fpm-8.4.27-${rel}.x86_64"; dbg_rpm="php-fpm-debuginfo-8.4.27-${rel}.x86_64" ;;
+    php-fpm) pkg_rpm="php-fpm-8.4.27-${rel}.${RPM_ARCH}"; dbg_rpm="php-fpm-debuginfo-8.4.27-${rel}.${RPM_ARCH}" ;;
     # Fedora's `php` RPM is a metapackage; the CLI binary is in php-cli
-    *) pkg_rpm="php-cli-8.4.27-${rel}.x86_64"; dbg_rpm="php-cli-debuginfo-8.4.27-${rel}.x86_64" ;;
+    *) pkg_rpm="php-cli-8.4.27-${rel}.${RPM_ARCH}"; dbg_rpm="php-cli-debuginfo-8.4.27-${rel}.${RPM_ARCH}" ;;
   esac
-  col_rpm="php-debuginfo-8.4.27-${rel}.x86_64"
-  base="https://kojipkgs.fedoraproject.org/packages/php/8.4.27/${rel}/x86_64"
+  col_rpm="php-debuginfo-8.4.27-${rel}.${RPM_ARCH}"
+  base="https://kojipkgs.fedoraproject.org/packages/php/8.4.27/${rel}/${RPM_ARCH}"
 
   deb="$WORK/${pkg_rpm}.rpm"
   dbgdeb="$WORK/${dbg_rpm}.rpm"

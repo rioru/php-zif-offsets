@@ -1,0 +1,74 @@
+{
+  "meta": {
+    "php_version": "7.1.23",
+    "thread_safety": "NTS",
+    "arch": "aarch64",
+    "distro": "docker-library/php",
+    "package": "php:7.1.23-apache",
+    "binary_path": "/usr/lib/apache2/modules/libphp7.so",
+    "binary_type": "shared-libphp",
+    "build_id": "40dc6a7b417c877efc49506c2c6aa8368ea21aad",
+    "stripped": false,
+    "symbol_source": "readelf -sW (.symtab)",
+    "ps_id_offset_method": "zif_session_id field offsets off ps_globals base: ['0x10']",
+    "symbol_names": {
+      "zval_ptr_dtor": "_zval_ptr_dtor",
+      "php_session_abort": "php_session_abort.part.0",
+      "zend_mm_safe_error": "zend_mm_safe_error.isra.10",
+      "zend_mm_panic": "zend_mm_panic.constprop.14"
+    },
+    "notes": [
+      "zval_ptr_dtor present as _zval_ptr_dtor (php < 7.3 naming; value recorded under the canonical key)",
+      "MISSING Tier A: zend_reference_destroy"
+    ]
+  },
+  "exploit": {
+    "zval_ptr_dtor": "0x454388",
+    "zif_system": "0x386728",
+    "zif_exec": "0x386718",
+    "zif_passthru": "0x386738",
+    "zif_shell_exec": "0x386f00",
+    "zend_reference_destroy": null,
+    "zend_array_destroy": "0x4770e0",
+    "ps_globals": "0xafaa00",
+    "php_rfc1867_callback": "0xaf8880",
+    "ps_globals_id_offset": "0x10"
+  },
+  "calibration": {
+    "php_session_initialize": "0x3371b0",
+    "php_session_reset_id": "0x336508",
+    "php_session_create_id": "0x335ae8",
+    "ps_open_files": "0x338f98",
+    "ps_close_files": "0x338f38",
+    "php_session_abort": "0x333d08",
+    "php_rshutdown_session_globals": "0x331dc0",
+    "php_session_rfc1867_callback": "0x338340",
+    "php_url_encode": "0x3b7a98",
+    "sapi_add_header_ex": "0x40d368",
+    "sapi_header_op": "0x40cc90",
+    "zend_llist_destroy": "0x457c20",
+    "zend_mm_gc": "0x43c318",
+    "zend_mm_free_pages": "0x43b9f0",
+    "zend_mm_alloc_pages": "0x43c748",
+    "zend_mm_shutdown": "0x43d770",
+    "_efree": "0x43f140",
+    "_emalloc": "0x43f020",
+    "_erealloc": "0x43f208",
+    "zend_mm_safe_error": "0x1157d8",
+    "zend_mm_panic": "0x115870",
+    "rfc1867_post_handler": "0x40e778",
+    "php_hash_environment": "0x412af8",
+    "php_request_startup": "0x4032a0",
+    "php_request_shutdown": "0x403798",
+    "alloc_globals": "0xaf89f8",
+    "sapi_globals": "0xafef68",
+    "executor_globals": "0xaff420",
+    "core_globals": "0xafecd8",
+    "compiler_globals": "0xaffa28",
+    "sapi_module": "0xaff188"
+  },
+  "fingerprint": {
+    "zval_ptr_dtor_mod_0x1000": "0x388",
+    "zif_system_mod_0x1000": "0x728"
+  }
+}

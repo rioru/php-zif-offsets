@@ -22,9 +22,14 @@
 # Requires: curl, rpm2cpio, cpio, readelf, python3, jq.
 set -uo pipefail
 cd "$(dirname "$0")/.."
-WORK=work/redhat
-ARCH="${ARCH:-x86_64}"   # ELF arch in meta + row filename (aarch64 later)
-DEBUG=work/debuginfo
+ARCH="${ARCH:-x86_64}"
+case "$ARCH" in
+  x86_64)  RPM_ARCH=x86_64 ;;
+  aarch64) RPM_ARCH=aarch64 ;;
+  *) echo "ERROR: unsupported ARCH=$ARCH (x86_64|aarch64)" >&2; exit 1 ;;
+esac
+WORK=work/redhat-${ARCH}
+DEBUG=work/debuginfo-${ARCH}
 mkdir -p "$WORK" "$DEBUG" data
 FAILURES=()
 
@@ -49,28 +54,28 @@ build_id_of() { readelf -n "$1" | sed -nE 's/.*Build ID: ([0-9a-f]+).*/\1/p' | h
 
 # repo|rpm NEVRA (no .rpm)|php version|binary path inside rpm|installed path|distro label
 ROWS=(
-  "rocky|php-fpm-8.0.30-8.el9_8.1.x86_64|8.0.30|usr/sbin/php-fpm|/usr/sbin/php-fpm|rocky-9"
-  "rocky|php-fpm-8.1.32-1.module+el9.7.0+40003+454ed3c4.x86_64|8.1.32|usr/sbin/php-fpm|/usr/sbin/php-fpm|rocky-9"
-  "rocky|php-fpm-8.2.35-1.module+el9.8.0+40395+2f706e64.x86_64|8.2.35|usr/sbin/php-fpm|/usr/sbin/php-fpm|rocky-9"
-  "rocky|php-fpm-8.3.36-1.module+el9.8.0+40396+4e680bb7.x86_64|8.3.36|usr/sbin/php-fpm|/usr/sbin/php-fpm|rocky-9"
-  "remi|php80-php-fpm-8.0.30-21.el9.remi.x86_64|8.0.30|opt/remi/php80/root/usr/sbin/php-fpm|/opt/remi/php80/root/usr/sbin/php-fpm|remi-el9"
-  "remi|php81-php-fpm-8.1.34-6.el9.remi.x86_64|8.1.34|opt/remi/php81/root/usr/sbin/php-fpm|/opt/remi/php81/root/usr/sbin/php-fpm|remi-el9"
-  "remi|php82-php-fpm-8.2.35-1.el9.remi.x86_64|8.2.35|opt/remi/php82/root/usr/sbin/php-fpm|/opt/remi/php82/root/usr/sbin/php-fpm|remi-el9"
-  "remi|php83-php-fpm-8.3.36-1.el9.remi.x86_64|8.3.36|opt/remi/php83/root/usr/sbin/php-fpm|/opt/remi/php83/root/usr/sbin/php-fpm|remi-el9"
-  "remi|php84-php-fpm-8.4.27-1.el9.remi.x86_64|8.4.27|opt/remi/php84/root/usr/sbin/php-fpm|/opt/remi/php84/root/usr/sbin/php-fpm|remi-el9"
-  "remi|php85-php-fpm-8.5.12-1.el9.remi.x86_64|8.5.12|opt/remi/php85/root/usr/sbin/php-fpm|/opt/remi/php85/root/usr/sbin/php-fpm|remi-el9"
-  "rocky8|php-fpm-7.2.24-1.module+el8.4.0+413+c9202dda.x86_64|7.2.24|usr/sbin/php-fpm|/usr/sbin/php-fpm|rocky-8"
-  "rocky8|php-fpm-7.3.20-1.module+el8.4.0+414+2e7afcdd.x86_64|7.3.20|usr/sbin/php-fpm|/usr/sbin/php-fpm|rocky-8"
-  "rocky8|php-fpm-7.4.33-8.module+el8.10.0+40393+c071e357.x86_64|7.4.33|usr/sbin/php-fpm|/usr/sbin/php-fpm|rocky-8"
-  "rocky8|php-fpm-8.0.30-1.module+el8.10.0+1605+02e07af7.x86_64|8.0.30|usr/sbin/php-fpm|/usr/sbin/php-fpm|rocky-8"
-  "rocky8|php-fpm-8.2.35-1.module+el8.10.0+40394+d21b33fb.x86_64|8.2.35|usr/sbin/php-fpm|/usr/sbin/php-fpm|rocky-8"
-  "remi8|php74-php-fpm-7.4.33-31.el8.remi.x86_64|7.4.33|opt/remi/php74/root/usr/sbin/php-fpm|/opt/remi/php74/root/usr/sbin/php-fpm|remi-el8"
-  "remi8|php80-php-fpm-8.0.30-21.el8.remi.x86_64|8.0.30|opt/remi/php80/root/usr/sbin/php-fpm|/opt/remi/php80/root/usr/sbin/php-fpm|remi-el8"
-  "remi8|php81-php-fpm-8.1.34-6.el8.remi.x86_64|8.1.34|opt/remi/php81/root/usr/sbin/php-fpm|/opt/remi/php81/root/usr/sbin/php-fpm|remi-el8"
-  "remi8|php82-php-fpm-8.2.35-1.el8.remi.x86_64|8.2.35|opt/remi/php82/root/usr/sbin/php-fpm|/opt/remi/php82/root/usr/sbin/php-fpm|remi-el8"
-  "remi8|php83-php-fpm-8.3.36-1.el8.remi.x86_64|8.3.36|opt/remi/php83/root/usr/sbin/php-fpm|/opt/remi/php83/root/usr/sbin/php-fpm|remi-el8"
-  "remi8|php84-php-fpm-8.4.27-1.el8.remi.x86_64|8.4.27|opt/remi/php84/root/usr/sbin/php-fpm|/opt/remi/php84/root/usr/sbin/php-fpm|remi-el8"
-  "remi8|php85-php-fpm-8.5.12-1.el8.remi.x86_64|8.5.12|opt/remi/php85/root/usr/sbin/php-fpm|/opt/remi/php85/root/usr/sbin/php-fpm|remi-el8"
+  "rocky|php-fpm-8.0.30-8.el9_8.1.${RPM_ARCH}|8.0.30|usr/sbin/php-fpm|/usr/sbin/php-fpm|rocky-9"
+  "rocky|php-fpm-8.1.32-1.module+el9.7.0+40003+454ed3c4.${RPM_ARCH}|8.1.32|usr/sbin/php-fpm|/usr/sbin/php-fpm|rocky-9"
+  "rocky|php-fpm-8.2.35-1.module+el9.8.0+40395+2f706e64.${RPM_ARCH}|8.2.35|usr/sbin/php-fpm|/usr/sbin/php-fpm|rocky-9"
+  "rocky|php-fpm-8.3.36-1.module+el9.8.0+40396+4e680bb7.${RPM_ARCH}|8.3.36|usr/sbin/php-fpm|/usr/sbin/php-fpm|rocky-9"
+  "remi|php80-php-fpm-8.0.30-21.el9.remi.${RPM_ARCH}|8.0.30|opt/remi/php80/root/usr/sbin/php-fpm|/opt/remi/php80/root/usr/sbin/php-fpm|remi-el9"
+  "remi|php81-php-fpm-8.1.34-6.el9.remi.${RPM_ARCH}|8.1.34|opt/remi/php81/root/usr/sbin/php-fpm|/opt/remi/php81/root/usr/sbin/php-fpm|remi-el9"
+  "remi|php82-php-fpm-8.2.35-1.el9.remi.${RPM_ARCH}|8.2.35|opt/remi/php82/root/usr/sbin/php-fpm|/opt/remi/php82/root/usr/sbin/php-fpm|remi-el9"
+  "remi|php83-php-fpm-8.3.36-1.el9.remi.${RPM_ARCH}|8.3.36|opt/remi/php83/root/usr/sbin/php-fpm|/opt/remi/php83/root/usr/sbin/php-fpm|remi-el9"
+  "remi|php84-php-fpm-8.4.27-1.el9.remi.${RPM_ARCH}|8.4.27|opt/remi/php84/root/usr/sbin/php-fpm|/opt/remi/php84/root/usr/sbin/php-fpm|remi-el9"
+  "remi|php85-php-fpm-8.5.12-1.el9.remi.${RPM_ARCH}|8.5.12|opt/remi/php85/root/usr/sbin/php-fpm|/opt/remi/php85/root/usr/sbin/php-fpm|remi-el9"
+  "rocky8|php-fpm-7.2.24-1.module+el8.4.0+413+c9202dda.${RPM_ARCH}|7.2.24|usr/sbin/php-fpm|/usr/sbin/php-fpm|rocky-8"
+  "rocky8|php-fpm-7.3.20-1.module+el8.4.0+414+2e7afcdd.${RPM_ARCH}|7.3.20|usr/sbin/php-fpm|/usr/sbin/php-fpm|rocky-8"
+  "rocky8|php-fpm-7.4.33-8.module+el8.10.0+40393+c071e357.${RPM_ARCH}|7.4.33|usr/sbin/php-fpm|/usr/sbin/php-fpm|rocky-8"
+  "rocky8|php-fpm-8.0.30-1.module+el8.10.0+1605+02e07af7.${RPM_ARCH}|8.0.30|usr/sbin/php-fpm|/usr/sbin/php-fpm|rocky-8"
+  "rocky8|php-fpm-8.2.35-1.module+el8.10.0+40394+d21b33fb.${RPM_ARCH}|8.2.35|usr/sbin/php-fpm|/usr/sbin/php-fpm|rocky-8"
+  "remi8|php74-php-fpm-7.4.33-31.el8.remi.${RPM_ARCH}|7.4.33|opt/remi/php74/root/usr/sbin/php-fpm|/opt/remi/php74/root/usr/sbin/php-fpm|remi-el8"
+  "remi8|php80-php-fpm-8.0.30-21.el8.remi.${RPM_ARCH}|8.0.30|opt/remi/php80/root/usr/sbin/php-fpm|/opt/remi/php80/root/usr/sbin/php-fpm|remi-el8"
+  "remi8|php81-php-fpm-8.1.34-6.el8.remi.${RPM_ARCH}|8.1.34|opt/remi/php81/root/usr/sbin/php-fpm|/opt/remi/php81/root/usr/sbin/php-fpm|remi-el8"
+  "remi8|php82-php-fpm-8.2.35-1.el8.remi.${RPM_ARCH}|8.2.35|opt/remi/php82/root/usr/sbin/php-fpm|/opt/remi/php82/root/usr/sbin/php-fpm|remi-el8"
+  "remi8|php83-php-fpm-8.3.36-1.el8.remi.${RPM_ARCH}|8.3.36|opt/remi/php83/root/usr/sbin/php-fpm|/opt/remi/php83/root/usr/sbin/php-fpm|remi-el8"
+  "remi8|php84-php-fpm-8.4.27-1.el8.remi.${RPM_ARCH}|8.4.27|opt/remi/php84/root/usr/sbin/php-fpm|/opt/remi/php84/root/usr/sbin/php-fpm|remi-el8"
+  "remi8|php85-php-fpm-8.5.12-1.el8.remi.${RPM_ARCH}|8.5.12|opt/remi/php85/root/usr/sbin/php-fpm|/opt/remi/php85/root/usr/sbin/php-fpm|remi-el8"
 )
 
 for row in "${ROWS[@]}"; do
@@ -81,17 +86,17 @@ for row in "${ROWS[@]}"; do
   col_rpm=${rpm/-fpm-/-debuginfo-}
   case $repo in
     rocky)
-      base="https://dl.rockylinux.org/pub/rocky/9/AppStream/x86_64/os/Packages/p"
-      dbase="https://dl.rockylinux.org/pub/rocky/9/AppStream/x86_64/debug/tree/Packages/p" ;;
+      base="https://dl.rockylinux.org/pub/rocky/9/AppStream/${RPM_ARCH}/os/Packages/p"
+      dbase="https://dl.rockylinux.org/pub/rocky/9/AppStream/${RPM_ARCH}/debug/tree/Packages/p" ;;
     remi)
-      base="https://rpms.remirepo.net/enterprise/9/remi/x86_64"
-      dbase="https://rpms.remirepo.net/enterprise/9/debug-remi/x86_64" ;;
+      base="https://rpms.remirepo.net/enterprise/9/remi/${RPM_ARCH}"
+      dbase="https://rpms.remirepo.net/enterprise/9/debug-remi/${RPM_ARCH}" ;;
     rocky8)
-      base="https://dl.rockylinux.org/pub/rocky/8/AppStream/x86_64/os/Packages/p"
-      dbase="https://dl.rockylinux.org/pub/rocky/8/AppStream/x86_64/debug/tree/Packages/p" ;;
+      base="https://dl.rockylinux.org/pub/rocky/8/AppStream/${RPM_ARCH}/os/Packages/p"
+      dbase="https://dl.rockylinux.org/pub/rocky/8/AppStream/${RPM_ARCH}/debug/tree/Packages/p" ;;
     remi8)
-      base="https://rpms.remirepo.net/enterprise/8/remi/x86_64"
-      dbase="https://rpms.remirepo.net/enterprise/8/debug-remi/x86_64" ;;
+      base="https://rpms.remirepo.net/enterprise/8/remi/${RPM_ARCH}"
+      dbase="https://rpms.remirepo.net/enterprise/8/debug-remi/${RPM_ARCH}" ;;
   esac
   # '+' in NEVRAs is URL-encoded as %2B on the mirrors
   url_rpm=${rpm//+/%2B}

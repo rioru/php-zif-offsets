@@ -1,0 +1,71 @@
+{
+  "meta": {
+    "php_version": "8.3.36",
+    "thread_safety": "NTS",
+    "arch": "aarch64",
+    "distro": "alpine-3.22",
+    "package": "php83-session-8.3.36-r0",
+    "binary_path": "/usr/lib/php83/modules/session.so",
+    "binary_type": "shared-ext",
+    "build_id": "8da155bd44f4a9680bb916dbf0ab12c104e4d0a3",
+    "stripped": true,
+    "symbol_source": "readelf --dyn-syms + debug-file symtab (session.so.debug, +189 symbols)",
+    "ps_id_offset_method": "pahole php_ps_globals (DWARF)",
+    "symbol_names": null,
+    "notes": [
+      "Alpine splits the session extension into a shared module: core interpreter symbols (zval_ptr_dtor, zif_*, zend_reference_destroy, zend_array_destroy, php_rfc1867_callback) are UND imports here - see the matching fpm/apache row for those",
+      "alloc_globals recovery failed: ambiguous candidates: {}",
+      "MISSING Tier A: zval_ptr_dtor, zif_system, zif_exec, zif_passthru, zif_shell_exec, zend_reference_destroy, zend_array_destroy, php_rfc1867_callback",
+      "zend_mm_safe_error absent from this build: removed upstream in the php 8.2.35/8.3.36/8.4.27/8.5.12 patch releases (present in earlier 8.x patch releases; zend_mm_panic is the closest equivalent here)"
+    ]
+  },
+  "exploit": {
+    "zval_ptr_dtor": null,
+    "zif_system": null,
+    "zif_exec": null,
+    "zif_passthru": null,
+    "zif_shell_exec": null,
+    "zend_reference_destroy": null,
+    "zend_array_destroy": null,
+    "ps_globals": "0x30508",
+    "php_rfc1867_callback": null,
+    "ps_globals_id_offset": "0x10"
+  },
+  "calibration": {
+    "php_session_initialize": "0x7348",
+    "php_session_reset_id": "0x5c80",
+    "php_session_create_id": "0x4ce8",
+    "ps_open_files": "0xe1d8",
+    "ps_close_files": "0xe3ac",
+    "php_session_abort": null,
+    "php_rshutdown_session_globals": "0x49b8",
+    "php_session_rfc1867_callback": "0xc9e4",
+    "php_url_encode": null,
+    "sapi_add_header_ex": null,
+    "sapi_header_op": null,
+    "zend_llist_destroy": null,
+    "zend_mm_gc": null,
+    "zend_mm_free_pages": null,
+    "zend_mm_alloc_pages": null,
+    "zend_mm_shutdown": null,
+    "_efree": null,
+    "_emalloc": null,
+    "_erealloc": null,
+    "zend_mm_safe_error": null,
+    "zend_mm_panic": null,
+    "rfc1867_post_handler": null,
+    "php_hash_environment": null,
+    "php_request_startup": null,
+    "php_request_shutdown": null,
+    "alloc_globals": null,
+    "sapi_globals": null,
+    "executor_globals": null,
+    "core_globals": null,
+    "compiler_globals": null,
+    "sapi_module": null
+  },
+  "fingerprint": {
+    "zval_ptr_dtor_mod_0x1000": null,
+    "zif_system_mod_0x1000": null
+  }
+}

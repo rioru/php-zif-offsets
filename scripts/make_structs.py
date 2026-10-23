@@ -22,41 +22,41 @@ REPO = Path(__file__).resolve().parent.parent
 # php minor -> (primary full version, primary debug file glob)
 # Remi el9 in-tree files carry the dwz alternate next to them
 PRIMARY = {
-    "8.0": ("8.0.30", "work/redhat/extract/php80-php-fpm-debuginfo-*/usr/lib/debug/opt/remi/php80/root/usr/sbin/php-fpm-*.debug"),
-    "8.1": ("8.1.34", "work/redhat/extract/php81-php-fpm-debuginfo-*/usr/lib/debug/opt/remi/php81/root/usr/sbin/php-fpm-*.debug"),
-    "8.2": ("8.2.35", "work/redhat/extract/php82-php-fpm-debuginfo-*/usr/lib/debug/opt/remi/php82/root/usr/sbin/php-fpm-*.debug"),
-    "8.3": ("8.3.36", "work/redhat/extract/php83-php-fpm-debuginfo-*/usr/lib/debug/opt/remi/php83/root/usr/sbin/php-fpm-*.debug"),
-    "8.4": ("8.4.27", "work/redhat/extract/php84-php-fpm-debuginfo-*/usr/lib/debug/opt/remi/php84/root/usr/sbin/php-fpm-*.debug"),
-    "8.5": ("8.5.12", "work/redhat/extract/php85-php-fpm-debuginfo-*/usr/lib/debug/opt/remi/php85/root/usr/sbin/php-fpm-*.debug"),
+    "8.0": ("8.0.30", "work/redhat-x86_64/extract/php80-php-fpm-debuginfo-*el9*/usr/lib/debug/opt/remi/php80/root/usr/sbin/php-fpm-*.debug"),
+    "8.1": ("8.1.34", "work/redhat-x86_64/extract/php81-php-fpm-debuginfo-*el9*/usr/lib/debug/opt/remi/php81/root/usr/sbin/php-fpm-*.debug"),
+    "8.2": ("8.2.35", "work/redhat-x86_64/extract/php82-php-fpm-debuginfo-*el9*/usr/lib/debug/opt/remi/php82/root/usr/sbin/php-fpm-*.debug"),
+    "8.3": ("8.3.36", "work/redhat-x86_64/extract/php83-php-fpm-debuginfo-*el9*/usr/lib/debug/opt/remi/php83/root/usr/sbin/php-fpm-*.debug"),
+    "8.4": ("8.4.27", "work/redhat-x86_64/extract/php84-php-fpm-debuginfo-*el9*/usr/lib/debug/opt/remi/php84/root/usr/sbin/php-fpm-*.debug"),
+    "8.5": ("8.5.12", "work/redhat-x86_64/extract/php85-php-fpm-debuginfo-*el9*/usr/lib/debug/opt/remi/php85/root/usr/sbin/php-fpm-*.debug"),
 }
 
 # php version of the collected binary -> cross-check debug files (standalone,
 # no dwz alternate needed)
 CROSS = {
-    "8.0.30": ["work/redhat/extract/php-fpm-debuginfo-8.0.30-8.el9_8.1.x86_64/usr/lib/debug/.build-id/*/*.debug"],
-    "8.1.2": ["work/debuginfo/ubuntu-jammy-php8.1-fpm.debug"],
-    "8.1.32": ["work/redhat/extract/php-fpm-debuginfo-8.1.32-1.module+el9.7.0+40003+454ed3c4.x86_64/usr/lib/debug/.build-id/*/*.debug"],
-    "8.1.34": ["work/debuginfo/remi-el9-php81-php-fpm-8.1.34-6.el9.remi.x86_64.debug"],
-    "8.2.32": ["work/debuginfo/debian-bookworm-php8.2-fpm.debug"],
+    "8.0.30": ["work/redhat-x86_64/extract/php-fpm-debuginfo-8.0.30-8.el9_8.1.x86_64/usr/lib/debug/.build-id/*/*.debug"],
+    "8.1.2": ["work/debuginfo-x86_64/ubuntu-jammy-php8.1-fpm.debug"],
+    "8.1.32": ["work/redhat-x86_64/extract/php-fpm-debuginfo-8.1.32-1.module+el9.7.0+40003+454ed3c4.x86_64/usr/lib/debug/.build-id/*/*.debug"],
+    "8.1.34": ["work/debuginfo-x86_64/remi-el9-php81-php-fpm-8.1.34-6.el9.remi.x86_64.debug"],
+    "8.2.32": ["work/debuginfo-x86_64/debian-bookworm-php8.2-fpm.debug"],
     "8.2.35": [
-        "work/redhat/extract/php-fpm-debuginfo-8.2.35-1.module+el9.8.0+40395+2f706e64.x86_64/usr/lib/debug/.build-id/*/*.debug",
-        "work/debuginfo/remi-el9-php82-php-fpm-8.2.35-1.el9.remi.x86_64.debug",
+        "work/redhat-x86_64/extract/php-fpm-debuginfo-8.2.35-1.module+el9.8.0+40395+2f706e64.x86_64/usr/lib/debug/.build-id/*/*.debug",
+        "work/debuginfo-x86_64/remi-el9-php82-php-fpm-8.2.35-1.el9.remi.x86_64.debug",
     ],
-    "8.3.6": ["work/debuginfo/ubuntu-noble-php8.3-fpm.debug"],
+    "8.3.6": ["work/debuginfo-x86_64/ubuntu-noble-php8.3-fpm.debug"],
     "8.3.36": [
-        "work/debuginfo/alpine-3.22-php83-fpm.debug",
-        "work/debuginfo/alpine-3.22-php83-session.debug",
-        "work/redhat/extract/php-fpm-debuginfo-8.3.36-1.module+el9.8.0+40396+4e680bb7.x86_64/usr/lib/debug/.build-id/*/*.debug",
-        "work/debuginfo/remi-el9-php83-php-fpm-8.3.36-1.el9.remi.x86_64.debug",
+        "work/debuginfo-x86_64/alpine-3.22-php83-fpm.debug",
+        "work/debuginfo-x86_64/alpine-3.22-php83-session.debug",
+        "work/redhat-x86_64/extract/php-fpm-debuginfo-8.3.36-1.module+el9.8.0+40396+4e680bb7.x86_64/usr/lib/debug/.build-id/*/*.debug",
+        "work/debuginfo-x86_64/remi-el9-php83-php-fpm-8.3.36-1.el9.remi.x86_64.debug",
     ],
     "8.4.27": [
-        "work/debuginfo/debian-trixie-php8.4-fpm.debug",
-        "work/debuginfo/alpine-3.22-php84-fpm.debug",
-        "work/debuginfo/alpine-3.22-php84-session.debug",
-        "work/redhat/extract/php-cli-debuginfo-8.4.27-2.fc43.x86_64/usr/lib/debug/.build-id/*/*.debug",
-        "work/debuginfo/remi-el9-php84-php-fpm-8.4.27-1.el9.remi.x86_64.debug",
+        "work/debuginfo-x86_64/debian-trixie-php8.4-fpm.debug",
+        "work/debuginfo-x86_64/alpine-3.22-php84-fpm.debug",
+        "work/debuginfo-x86_64/alpine-3.22-php84-session.debug",
+        "work/redhat-x86_64/extract/php-cli-debuginfo-8.4.27-2.fc43.x86_64/usr/lib/debug/.build-id/*/*.debug",
+        "work/debuginfo-x86_64/remi-el9-php84-php-fpm-8.4.27-1.el9.remi.x86_64.debug",
     ],
-    "8.5.12": ["work/debuginfo/remi-el9-php85-php-fpm-8.5.12-1.el9.remi.x86_64.debug"],
+    "8.5.12": ["work/debuginfo-x86_64/remi-el9-php85-php-fpm-8.5.12-1.el9.remi.x86_64.debug"],
 }
 
 # struct -> (DWARF tag, curated field list; None = all top-level fields)
@@ -151,7 +151,7 @@ def main():
         f = resolve(PRIMARY[v][1])
         if not f:
             sys.exit(f"primary debug file for php {v} not found - run scripts/redhat.sh first")
-        prim[v] = f
+        prim[v] = f.relative_to(REPO)
         prim_ver[v] = PRIMARY[v][0]
 
     # parse everything
@@ -200,6 +200,15 @@ def main():
         "Generated by `scripts/make_structs.py` from public debug-info "
         "(pahole). Layouts are a property of the PHP source version and the "
         "x86_64 SysV ABI, not of the distro.\n"
+    )
+    lines.append(
+        "aarch64 note: the aarch64 SysV ABI produces the same layouts for "
+        "these\nstructs (same pointer/int widths, same natural alignment), "
+        "and the\nexploit-relevant one was verified directly: "
+        "`php_ps_globals` dumped via\npahole from an arm64 debug file "
+        "(Debian bookworm php8.2 ddeb) is\nfield-for-field identical to the "
+        "x86_64 layout below, so\n`ps_globals_id_offset` values are valid on "
+        "both arches.\n"
     )
     lines.append("Primary debug files (one per PHP minor, Remi el9):\n")
     for v in versions:

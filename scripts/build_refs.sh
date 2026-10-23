@@ -6,9 +6,18 @@
 # plus every LOCAL symbol, so extract_symbols.py --reference-binary can
 # pattern-match older stripped builds of the same suite against it.
 # The current binaries + debug files come from the regular
-# ubuntu.sh/debian.sh passes (work/<family>/extract, work/debuginfo).
+# ubuntu.sh/debian.sh passes (work/<family>-<ARCH>/extract,
+# work/debuginfo-<ARCH>).
+#
+# Env: ARCH=x86_64|aarch64   refs are per-arch:
+#      work/refs/<family>-<suite>-<sapi>-<ARCH>.merged
 set -uo pipefail
 cd "$(dirname "$0")/.."
+ARCH="${ARCH:-x86_64}"
+case "$ARCH" in
+  x86_64|aarch64) ;;
+  *) echo "ERROR: unsupported ARCH=$ARCH (x86_64|aarch64)" >&2; exit 1 ;;
+esac
 mkdir -p work/refs
 
 build_ref() { # out bin dbg
@@ -22,23 +31,23 @@ build_ref() { # out bin dbg
 
 for s in focal:7.4 bionic:7.2 xenial:7.0 jammy:8.1 noble:8.3; do
   suite=${s%%:*}; php=${s##*:}
-  build_ref "work/refs/ubuntu-${suite}-apache.merged" \
-    "work/ubuntu/extract/libapache2-mod-php${php}/usr/lib/apache2/modules/libphp${php}.so" \
-    "work/debuginfo/ubuntu-${suite}-libapache2-mod-php${php}.debug"
-  build_ref "work/refs/ubuntu-${suite}-fpm.merged" \
-    "work/ubuntu/extract/php${php}-fpm/usr/sbin/php-fpm${php}" \
-    "work/debuginfo/ubuntu-${suite}-php${php}-fpm.debug"
+  build_ref "work/refs/ubuntu-${suite}-apache-${ARCH}.merged" \
+    "work/ubuntu-${ARCH}/extract/libapache2-mod-php${php}/usr/lib/apache2/modules/libphp${php}.so" \
+    "work/debuginfo-${ARCH}/ubuntu-${suite}-libapache2-mod-php${php}.debug"
+  build_ref "work/refs/ubuntu-${suite}-fpm-${ARCH}.merged" \
+    "work/ubuntu-${ARCH}/extract/php${php}-fpm/usr/sbin/php-fpm${php}" \
+    "work/debuginfo-${ARCH}/ubuntu-${suite}-php${php}-fpm.debug"
 done
 
 for s in bookworm:8.2 trixie:8.4 bullseye:7.4 buster:7.3 stretch:7.0; do
   suite=${s%%:*}; php=${s##*:}
-  build_ref "work/refs/debian-${suite}-apache.merged" \
-    "work/debian/extract/libapache2-mod-php${php}/usr/lib/apache2/modules/libphp${php}.so" \
-    "work/debuginfo/debian-${suite}-libapache2-mod-php${php}.debug"
-  build_ref "work/refs/debian-${suite}-fpm.merged" \
-    "work/debian/extract/php${php}-fpm/usr/sbin/php-fpm${php}" \
-    "work/debuginfo/debian-${suite}-php${php}-fpm.debug"
-  build_ref "work/refs/debian-${suite}-cgi.merged" \
-    "work/debian/extract/php${php}-cgi/usr/lib/cgi-bin/php${php}" \
-    "work/debuginfo/debian-${suite}-php${php}-cgi.debug"
+  build_ref "work/refs/debian-${suite}-apache-${ARCH}.merged" \
+    "work/debian-${ARCH}/extract/libapache2-mod-php${php}/usr/lib/apache2/modules/libphp${php}.so" \
+    "work/debuginfo-${ARCH}/debian-${suite}-libapache2-mod-php${php}.debug"
+  build_ref "work/refs/debian-${suite}-fpm-${ARCH}.merged" \
+    "work/debian-${ARCH}/extract/php${php}-fpm/usr/sbin/php-fpm${php}" \
+    "work/debuginfo-${ARCH}/debian-${suite}-php${php}-fpm.debug"
+  build_ref "work/refs/debian-${suite}-cgi-${ARCH}.merged" \
+    "work/debian-${ARCH}/extract/php${php}-cgi/usr/lib/cgi-bin/php${php}" \
+    "work/debuginfo-${ARCH}/debian-${suite}-php${php}-cgi.debug"
 done

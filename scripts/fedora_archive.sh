@@ -8,23 +8,31 @@
 # masked pattern match against a merged reference build: per (release,
 # major.minor, SAPI) the newest build of that major.minor in that
 # release, fused with its debuginfo symtab via eu-unstrip
-# (work/refs/fedora-<NN>-<majmin>-<sapi>.merged) - the same scheme as
+# (work/refs/fedora-<NN>-<majmin>-<sapi>-<ARCH>.merged) - the same scheme as
 # the debian/ubuntu archive sweeps. The reference build's own row is
 # also pattern-matched against its merged ref (exact code match).
 #
 # Resumable: existing data/ rows are skipped; RPMs and directory
-# listings are cached under work/fedora-archive/.
+# listings are cached under work/fedora-archive-<ARCH>/; the koji build
+# enumeration is shared across arches under work/fedora-koji-enum/.
 #
 # Requires: curl, rpm2cpio, cpio, readelf, eu-unstrip, python3, jq.
-# Env: ARCH=x86_64   ELF arch recorded in meta and the row filename.
+# Env: ARCH=x86_64|aarch64   ELF arch recorded in meta and the row
+#      filename; selects the koji <arch>/ directory and RPM suffix.
 set -uo pipefail
 cd "$(dirname "$0")/.."
-WORK=work/fedora-archive
-REFS=work/refs
-LOG=work/logs/fedora-archive.log
 ARCH="${ARCH:-x86_64}"
+case "$ARCH" in
+  x86_64)  RPM_ARCH=x86_64 ;;
+  aarch64) RPM_ARCH=aarch64 ;;
+  *) echo "ERROR: unsupported ARCH=$ARCH (x86_64|aarch64)" >&2; exit 1 ;;
+esac
+WORK=work/fedora-archive-${ARCH}
+ENUM=work/fedora-koji-enum   # shared version/build enumeration (arch-independent)
+REFS=work/refs
+LOG=work/logs/fedora-archive-${ARCH}.log
 BASE=https://kojipkgs.fedoraproject.org/packages/php
-mkdir -p "$WORK" "$REFS" data work/logs
+mkdir -p "$WORK" "$ENUM" "$REFS" data work/logs
 FAILURES=()
 
 fetch() { # url dest
@@ -47,8 +55,8 @@ extract_rpm() { # rpm dir
 build_id_of() { readelf -n "$1" | sed -nE 's/.*Build ID: ([0-9a-f]+).*/\1/p' | head -1; }
 
 # --- enumerate builds: ver|rel|NN lines for fc28..fc43 ------------------------
-VERS="$WORK/versions.txt"
-BUILDS="$WORK/builds.txt"
+VERS="$ENUM/versions.txt"
+BUILDS="$ENUM/builds.txt"
 if [ ! -s "$BUILDS" ]; then
   [ -s "$VERS" ] || curl -fsSL --max-time 120 "$BASE/" |
     grep -oE 'href="[0-9][0-9.]+/"' | sed 's/href="//;s#/"##' |
@@ -67,35 +75,35 @@ echo "$(wc -l < "$BUILDS") fc28+ builds enumerated" | tee -a "$LOG"
 
 # --- reference builds: newest (ver, rel) per (NN, major.minor) ---------------
 # sorted builds -> last line per group is the newest
-REFLIST="$WORK/refbuilds.txt"
+REFLIST="$ENUM/refbuilds.txt"
 sort -t'|' -k3,3n -k1,1V -k2,2V "$BUILDS" |
   awk -F'|' '{ mm=$1; sub(/\.[0-9]+$/, "", mm); key=$3"|"mm; last[key]=$1"|"$2"|"$3 } END { for (k in last) print last[k] }' > "$REFLIST"
 echo "$(wc -l < "$REFLIST") reference builds" | tee -a "$LOG"
 
 build_ref() { # nn majmin ver rel sapi
   local nn=$1 mm=$2 ver=$3 rel=$4 sapi=$5
-  local ref="$REFS/fedora-${nn}-${mm}-${sapi}.merged"
+  local ref="$REFS/fedora-${nn}-${mm}-${sapi}-${ARCH}.merged"
   [ -f "$ref" ] && return 0
   local list="$WORK/list-${ver}-${rel}.txt"
-  fetch "$BASE/$ver/$rel/x86_64/" "$list" || { echo "ERROR: listing fetch failed for $ver-$rel" | tee -a "$LOG" >&2; return 1; }
+  fetch "$BASE/$ver/$rel/${RPM_ARCH}/" "$list" || { echo "ERROR: listing fetch failed for $ver-$rel" | tee -a "$LOG" >&2; return 1; }
   local binrpm dbg_rpm dbg_rpm2
   case $sapi in
-    cli) binrpm=$(sed 's/href="//;s/"//' "$list" | grep -oE "php-cli-${ver//./\\.}-${rel//./\\.}\.x86_64\.rpm" | head -1) ;;
-    fpm) binrpm=$(sed 's/href="//;s/"//' "$list" | grep -oE "php-fpm-${ver//./\\.}-${rel//./\\.}\.x86_64\.rpm" | head -1) ;;
+    cli) binrpm=$(sed 's/href="//;s/"//' "$list" | grep -oE "php-cli-${ver//./\\.}-${rel//./\\.}\.${RPM_ARCH}.rpm" | head -1) ;;
+    fpm) binrpm=$(sed 's/href="//;s/"//' "$list" | grep -oE "php-fpm-${ver//./\\.}-${rel//./\\.}\.${RPM_ARCH}.rpm" | head -1) ;;
   esac
   [ -n "$binrpm" ] || { echo "ERROR: no $sapi RPM for $ver-$rel" | tee -a "$LOG" >&2; return 1; }
   # per-subpackage debuginfo first, collection php-debuginfo as fallback
   dbg_rpm=${binrpm/php-cli-/php-cli-debuginfo-}; dbg_rpm=${dbg_rpm/php-fpm-/php-fpm-debuginfo-}
   dbg_rpm2=${binrpm/php-cli-/php-debuginfo-}; dbg_rpm2=${dbg_rpm2/php-fpm-/php-debuginfo-}
   local xdir="$WORK/extract/${binrpm%.rpm}" gdir="$WORK/extract/dbg-${ver}-${rel}-${sapi}"
-  fetch "$BASE/$ver/$rel/x86_64/$binrpm" "$WORK/$binrpm" || return 1
+  fetch "$BASE/$ver/$rel/${RPM_ARCH}/$binrpm" "$WORK/$binrpm" || return 1
   [ -f "$xdir/usr/bin/php" ] || [ -f "$xdir/usr/bin/php-fpm" ] || extract_rpm "$WORK/$binrpm" "$xdir" || return 1
   if [ ! -d "$gdir/usr/lib/debug" ]; then
-    if fetch "$BASE/$ver/$rel/x86_64/$dbg_rpm" "$WORK/$dbg_rpm"; then
+    if fetch "$BASE/$ver/$rel/${RPM_ARCH}/$dbg_rpm" "$WORK/$dbg_rpm"; then
       extract_rpm "$WORK/$dbg_rpm" "$gdir" || return 1
       # the collection php-debuginfo carries the shared dwz alternate
-      fetch "$BASE/$ver/$rel/x86_64/$dbg_rpm2" "$WORK/$dbg_rpm2" && extract_rpm "$WORK/$dbg_rpm2" "$gdir" || true
-    elif fetch "$BASE/$ver/$rel/x86_64/$dbg_rpm2" "$WORK/$dbg_rpm2"; then
+      fetch "$BASE/$ver/$rel/${RPM_ARCH}/$dbg_rpm2" "$WORK/$dbg_rpm2" && extract_rpm "$WORK/$dbg_rpm2" "$gdir" || true
+    elif fetch "$BASE/$ver/$rel/${RPM_ARCH}/$dbg_rpm2" "$WORK/$dbg_rpm2"; then
       extract_rpm "$WORK/$dbg_rpm2" "$gdir" || return 1
     else
       echo "ERROR: no debuginfo RPM for $ver-$rel ($sapi ref)" | tee -a "$LOG" >&2; return 1
@@ -125,7 +133,7 @@ done < "$REFLIST"
 while IFS='|' read -r ver rel nn; do
   mm=${ver%.*}
   list="$WORK/list-${ver}-${rel}.txt"
-  fetch "$BASE/$ver/$rel/x86_64/" "$list" || { FAILURES+=("$ver-$rel listing"); continue; }
+  fetch "$BASE/$ver/$rel/${RPM_ARCH}/" "$list" || { FAILURES+=("$ver-$rel listing"); continue; }
   for sapi in cli fpm; do
     case $sapi in
       cli) bt=static-pie; suffix=cli-php;    binrpm_pat="php-cli-" ;;
@@ -133,10 +141,10 @@ while IFS='|' read -r ver rel nn; do
     esac
     out_json="data/fedora-${nn}-php-${ver}-${rel}-${suffix}-${ARCH}.json"
     [ -f "$out_json" ] && continue
-    binrpm=$(sed 's/href="//;s/"//' "$list" | grep -oE "${binrpm_pat}${ver//./\\.}-${rel//./\\.}\.x86_64\.rpm" | head -1)
+    binrpm=$(sed 's/href="//;s/"//' "$list" | grep -oE "${binrpm_pat}${ver//./\\.}-${rel//./\\.}\.${RPM_ARCH}.rpm" | head -1)
     [ -n "$binrpm" ] || { echo "  no $sapi RPM for $ver-$rel" | tee -a "$LOG"; continue; }
     xdir="$WORK/extract/${binrpm%.rpm}"
-    fetch "$BASE/$ver/$rel/x86_64/$binrpm" "$WORK/$binrpm" || { FAILURES+=("$binrpm"); continue; }
+    fetch "$BASE/$ver/$rel/${RPM_ARCH}/$binrpm" "$WORK/$binrpm" || { FAILURES+=("$binrpm"); continue; }
     # php-fpm moved from /usr/sbin (fc28..fc30) to /usr/bin (fc31+)
     case $sapi in
       cli)
@@ -150,7 +158,7 @@ while IFS='|' read -r ver rel nn; do
     esac
     bin="$xdir$bp"
     [ -f "$bin" ] || { echo "ERROR: binary not found: $bin" >&2; FAILURES+=("$binrpm"); continue; }
-    ref="$REFS/fedora-${nn}-${mm}-${sapi}.merged"
+    ref="$REFS/fedora-${nn}-${mm}-${sapi}-${ARCH}.merged"
     meta=$(jq -nc --arg pv "$ver" --arg pkg "${binrpm%.rpm}" --arg bp "$bp" --arg bt "$bt" \
       --arg distro "fedora-${nn}" --arg arch "$ARCH" \
       '{php_version:$pv, thread_safety:"NTS", arch:$arch, distro:$distro,

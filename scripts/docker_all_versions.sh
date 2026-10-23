@@ -15,6 +15,14 @@
 #                                          blobs are free via the CDN)
 #   4. docker.io/library/php              (counts; paced with HUB_SLEEP)
 #
+# Every docker-pull rung pins the pull to the platform-specific manifest
+# digest (resolved via `docker manifest inspect`): docker matches the local
+# image store by manifest digest, NOT platform, so a plain tag pull can
+# silently return a locally cached image of the WRONG architecture (this
+# host runs its own amd64 php containers whose images share the tag's index
+# digest). process_row additionally hard-checks the ELF machine of every
+# fetched binary, so a wrong-arch fetch can never reach data/.
+#
 # The apache modules (libphp*.so) are the only unstripped binaries in these
 # images. They are fetched first and kept as --reference-binary for the
 # stripped fpm/cli executables of the same version (extract_symbols.py
@@ -25,16 +33,25 @@
 #
 # Usage: docker_all_versions.sh [minor ...]   default: 5.4 5.5 5.6 7.0 ... 8.5
 # Env:   HUB_SLEEP=40   pause after each Docker-Hub-served tag (rate limit)
-#        ARCH=x86_64    ELF arch recorded in meta and in the row filename.
-#                      A future aarch64 pass also needs platform-aware pulls
-#                      (docker pull --platform linux/arm64; for the raw v1/v2
-#                      registry rungs, manifest-list platform selection).
+#        ARCH=x86_64|aarch64   ELF arch recorded in meta and in the row
+#                      filename. Pulls are platform-aware (docker pull
+#                      --platform linux/<arch> on the arch manifest digest;
+#                      the raw v2 registry rung selects the matching
+#                      manifest-list entry; the v1 rung is skipped for
+#                      aarch64 - that era was amd64-only).
+#                      arm64 variants exist from the php 7.1/7.2 era on.
 set -uo pipefail
 cd "$(dirname "$0")/.."
-WORK=work/docker-all
+ARCH="${ARCH:-x86_64}"
+case "$ARCH" in
+  x86_64)  DOCKER_ARCH=amd64 ;;
+  aarch64) DOCKER_ARCH=arm64 ;;
+  *) echo "ERROR: unsupported ARCH=$ARCH (x86_64|aarch64)" >&2; exit 1 ;;
+esac
+WORK=work/docker-all-${ARCH}
+TAGS_CACHE=work/docker-tags.txt   # shared tag list (arch-independent)
 LOGS=work/logs
 HUB_SLEEP="${HUB_SLEEP:-40}"
-ARCH="${ARCH:-x86_64}"
 MIRROR=mirror.gcr.io/library/php
 ECR=public.ecr.aws/docker/library/php
 HUB=docker.io/library/php
@@ -42,7 +59,7 @@ EMPTY_LAYER=sha256:a3ed95caeb02ffe68cdd9fd84406680ae93d633cb16422d00e8a7c22955b4
 mkdir -p "$WORK" "$LOGS" data
 
 # --- tag list (cached; fetched from the registry only when missing) ---------
-TAGS="$WORK/tags.txt"
+TAGS="$TAGS_CACHE"
 fetch_tag_list() {
   local tok url last
   tok=$(curl -s "https://auth.docker.io/token?service=registry.docker.io&scope=repository:library/php:pull" | jq -r .token)
@@ -79,6 +96,13 @@ binpaths() { # <minor> <sapi> -> candidate member paths, one per line
 bintype() { case "$1" in apache) echo shared-libphp;; *) echo static-pie;; esac; }
 suffix()   { case "$1" in apache) echo libphp;; fpm) echo php-fpm;; cli) echo php;; esac; }
 has_symtab() { readelf -SW "$1" 2>/dev/null | grep '\.symtab' > /dev/null; }
+elf_arch_of() { # <file> -> x86_64|aarch64|unknown
+  case "$(readelf -h "$1" 2>/dev/null | sed -nE 's/.*Machine:\s+(.*)/\1/p' | head -1)" in
+    "Advanced Micro Devices X86-64") echo x86_64 ;;
+    AArch64) echo aarch64 ;;
+    *) echo unknown ;;
+  esac
+}
 
 tag_for() { # <ver> <sapi> -> exact docker tag ("" when unavailable)
   local ver="$1" sapi="$2"
@@ -90,26 +114,46 @@ tag_for() { # <ver> <sapi> -> exact docker tag ("" when unavailable)
   esac
 }
 
+arch_digest() { # <ref> -> $DOCKER_ARCH manifest digest ("" when not multi-arch)
+  docker manifest inspect --verbose "$1" 2>/dev/null |
+    jq -r --arg pa "$DOCKER_ARCH" \
+      '[.[]?.Descriptor? | select(.platform.os=="linux" and .platform.architecture==$pa) | .digest][0] // empty' 2>/dev/null
+}
+
 fetch_via_docker() { # <ref> <members...> <out> - one pull, try each member
   local ref="$1"; shift
   local out="${@: -1}"; set -- "${@:1:$#-1}"
-  local cid member
-  docker pull -q "$ref" >/dev/null 2>&1 || return 1
-  cid=$(docker create "$ref" 2>/dev/null) || { docker rmi "$ref" >/dev/null 2>&1 || true; return 1; }
+  local cid member digest pullref
+  # Pin the pull to this run's platform manifest digest (see header): a
+  # plain tag pull can return a wrong-arch image that is already in the
+  # local store. Falls back to the tag pull for single-arch/v1-era tags,
+  # where the digest resolution returns nothing.
+  pullref="$ref"
+  digest=$(arch_digest "$ref")
+  [ -n "$digest" ] && pullref="$ref@$digest"
+  if ! docker pull -q --platform "linux/${DOCKER_ARCH}" "$pullref" >/dev/null 2>&1; then
+    [ "$pullref" = "$ref" ] && return 1
+    docker pull -q --platform "linux/${DOCKER_ARCH}" "$ref" >/dev/null 2>&1 || return 1
+    pullref="$ref"
+  fi
+  cid=$(docker create "$pullref" 2>/dev/null) || { docker rmi "$pullref" >/dev/null 2>&1 || true; return 1; }
   for member in "$@"; do
     if docker cp "$cid:$member" "$out" 2>/dev/null && [ -s "$out" ]; then
       docker rm "$cid" >/dev/null 2>&1 || true
-      docker rmi "$ref" >/dev/null 2>&1 || true
+      docker rmi "$pullref" >/dev/null 2>&1 || true
       FETCH_MEMBER="$member"
       return 0
     fi
   done
   docker rm "$cid" >/dev/null 2>&1 || true
-  docker rmi "$ref" >/dev/null 2>&1 || true
+  docker rmi "$pullref" >/dev/null 2>&1 || true
   return 1
 }
 
 fetch_via_v1() { # <tag> <members...> <out> - schema-v1 raw registry fallback
+  # schema-v1 tags are the 2014-2016 era, which Docker Hub shipped
+  # amd64-only; there is no arm64 content behind them.
+  [ "$ARCH" = "aarch64" ] && return 1
   local tag="$1"; shift
   local out="${@: -1}"; set -- "${@:1:$#-1}"
   local tok m sum tmp xdir member want
@@ -144,8 +188,30 @@ fetch_via_v2raw() { # <tag> <members...> <out> - schema-v2 raw registry fallback
   local tok m sum tmp xdir member want
   tok=$(curl -s "https://auth.docker.io/token?service=registry.docker.io&scope=repository:library/php:pull" | jq -r .token)
   m="$WORK/v2-manifest.json"; tmp="$WORK/v2-blob.tgz"; xdir="$WORK/v2x"
-  curl -s -H "Authorization: Bearer $tok" -H "Accept: application/vnd.docker.distribution.manifest.v2+json" \
+  curl -s -H "Authorization: Bearer $tok" \
+    -H "Accept: application/vnd.docker.distribution.manifest.v2+json, application/vnd.docker.distribution.manifest.list.v2+json" \
     "https://registry-1.docker.io/v2/library/php/manifests/$tag" -o "$m"
+  # multi-arch tags answer with a manifest list: pick this run's platform
+  if jq -e '.manifests' "$m" >/dev/null 2>&1; then
+    local digest
+    digest=$(jq -r --arg pa "$DOCKER_ARCH" \
+      'first(.manifests[] | select(.platform.os=="linux" and .platform.architecture==$pa)) | .digest // empty' "$m")
+    [ -n "$digest" ] || { rm -f "$m"; return 1; }  # no $DOCKER_ARCH build
+    curl -s -H "Authorization: Bearer $tok" -H "Accept: application/vnd.docker.distribution.manifest.v2+json" \
+      "https://registry-1.docker.io/v2/library/php/manifests/$digest" -o "$m"
+  else
+    # single-arch manifest (2014-2016 era tags): the platform lives in the
+    # config blob - reject the tag when it is not this run's arch
+    local cfg
+    cfg=$(jq -r '.config.digest // empty' "$m")
+    [ -n "$cfg" ] || { rm -f "$m"; return 1; }
+    curl -sL -H "Authorization: Bearer $tok" \
+      "https://registry-1.docker.io/v2/library/php/blobs/$cfg" -o "$WORK/v2-config.json"
+    if [ "$(jq -r '.architecture // empty' "$WORK/v2-config.json")" != "$DOCKER_ARCH" ]; then
+      rm -f "$m" "$WORK/v2-config.json"; return 1
+    fi
+    rm -f "$WORK/v2-config.json"
+  fi
   jq -e '.layers' "$m" >/dev/null 2>&1 || { rm -f "$m"; return 1; }  # not a schema-v2 tag
   while read -r sum; do
     [ "$sum" = "$EMPTY_LAYER" ] && continue
@@ -181,6 +247,13 @@ process_row() { # <ver> <sapi> <binfile> <member> <ref> <logfile>
   local minor="${ver%.*}"
   local out="data/docker-php-${ver}-${sapi}-$(suffix "$sapi")-${ARCH}.json"
   if [ -f "$out" ]; then echo "  skip (row exists): $out" >> "$log"; return 0; fi
+  # hard arch guard: never write a row whose binary is another ELF machine
+  local elf_arch
+  elf_arch=$(elf_arch_of "$binfile")
+  if [ "$elf_arch" != "$ARCH" ]; then
+    echo "  ARCH MISMATCH: $ver $sapi binary is $elf_arch, expected $ARCH - row skipped" >> "$log"
+    return 1
+  fi
   local meta
   meta=$(jq -nc --arg pv "$ver" --arg pkg "php:${ver}-${sapi}" --arg bp "$member" --arg bt "$(bintype "$sapi")" --arg arch "$ARCH" \
     '{php_version:$pv, thread_safety:"NTS", arch:$arch, distro:"docker-library/php",
@@ -207,7 +280,7 @@ process_row() { # <ver> <sapi> <binfile> <member> <ref> <logfile>
 
 run_minor() { # <minor>
   local minor="$1"
-  local log="$LOGS/docker-all-${minor}.log"
+  local log="$LOGS/docker-all-${minor}-${ARCH}.log"
   local dir="$WORK/$minor"
   mkdir -p "$dir"
   echo "=== minor $minor $(date -Is) ===" >> "$log"
@@ -221,6 +294,12 @@ run_minor() { # <minor>
   local have_apache=()
   for ver in "${versions[@]}"; do
     tag="${ver}-apache"; binfile="$dir/apache-${ver}.so"
+    # a cached binary from a previous (or interrupted) run may be the wrong
+    # arch (tag-pull contamination): re-fetch instead of trusting it
+    if [ -s "$binfile" ] && [ "$(elf_arch_of "$binfile")" != "$ARCH" ]; then
+      echo "  cached $tag binary is $(elf_arch_of "$binfile"), expected $ARCH - refetching" >> "$log"
+      rm -f "$binfile"
+    fi
     if [ ! -s "$binfile" ]; then
       mapfile -t members < <(binpaths "$minor" apache)
       if ! fetch_binary "$tag" "${members[@]}" "$binfile"; then
@@ -251,6 +330,10 @@ run_minor() { # <minor>
   for sapi in fpm cli; do
     for ver in "${have_apache[@]}"; do
       tag=$(tag_for "$ver" "$sapi"); [ -n "$tag" ] || { echo "  no tag: $ver $sapi" >> "$log"; continue; }
+      # resumability: skip the (slow, digest-pinned) image pull when the
+      # row already exists - the pull would be discarded by process_row
+      rowf="data/docker-php-${ver}-${sapi}-$(suffix "$sapi")-${ARCH}.json"
+      if [ -f "$rowf" ]; then echo "  skip (row exists): $rowf" >> "$log"; continue; fi
       binfile="$dir/${sapi}-${ver}-bin"
       mapfile -t members < <(binpaths "$minor" "$sapi")
       if ! fetch_binary "$tag" "${members[@]}" "$binfile"; then

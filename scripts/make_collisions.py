@@ -59,13 +59,17 @@ def field_section(field, offset_field, rows):
     fingerprinted = [
         (rid, row) for rid, row in rows if row["fingerprint"][field] is not None
     ]
+    # Collisions are per architecture: an offset is only usable against a
+    # target of the same ELF machine, so rows of different arches never
+    # form a pair even when their low 12 bits coincide.
     groups = {}
     for rid, row in fingerprinted:
-        groups.setdefault(row["fingerprint"][field], []).append((rid, row))
+        arch = row["meta"].get("arch", "x86_64")
+        groups.setdefault((arch, row["fingerprint"][field]), []).append((rid, row))
 
     pairs = []
-    for mod in sorted(groups):
-        members = sorted(groups[mod])
+    for key in sorted(groups):
+        members = sorted(groups[key])
         for i in range(len(members)):
             for j in range(i + 1, len(members)):
                 (rid_a, row_a), (rid_b, row_b) = members[i], members[j]
@@ -73,7 +77,7 @@ def field_section(field, offset_field, rows):
                 off_b = row_b["exploit"][offset_field]
                 pairs.append(
                     {
-                        "mod": mod,
+                        "mod": key[1],
                         "a": (rid_a, row_a),
                         "b": (rid_b, row_b),
                         "off_a": off_a,
@@ -86,14 +90,14 @@ def field_section(field, offset_field, rows):
     if not pairs:
         lines += [
             f"No collisions among {len(fingerprinted)} fingerprinted rows "
-            f"({len(groups)} distinct values).",
+            f"({len(groups)} distinct arch/value groups).",
             "",
         ]
         return "\n".join(lines), pairs
 
     lines += [
         f"{len(pairs)} colliding pair(s) among {len(fingerprinted)} "
-        f"fingerprinted rows ({len(groups)} distinct values).",
+        f"fingerprinted rows ({len(groups)} distinct arch/value groups).",
         "",
         f"| mod 0x1000 | row A | row B | {offset_field} A | {offset_field} B | verdict |",
         "|---|---|---|---|---|---|",
@@ -134,7 +138,10 @@ def main():
         "The research tooling uses `zval_ptr_dtor mod 0x1000` - the low 12 bits "
         "of the ELF st_value, the bits that survive ASLR in a leaked pointer - "
         "as a build fingerprint. A collision means the fingerprint alone "
-        "cannot tell the two builds apart. Verdicts:",
+        "cannot tell the two builds apart. Pairs only form within one "
+        "architecture (`meta.arch`): an offset is usable only against a "
+        "target of the same ELF machine, so x86_64 and aarch64 rows never "
+        "pair even when their low 12 bits coincide. Verdicts:",
         "",
         "- **identical** - the full st_value matches too: the two builds are "
         "interchangeable for that symbol (same offset, same layout).",

@@ -1,0 +1,73 @@
+{
+  "meta": {
+    "php_version": "7.0.24",
+    "thread_safety": "NTS",
+    "arch": "aarch64",
+    "distro": "docker-library/php",
+    "package": "php:7.0.24-apache",
+    "binary_path": "/usr/lib/apache2/modules/libphp7.so",
+    "binary_type": "shared-libphp",
+    "build_id": "19439185ef1655628ef9ee76fe0e60245bc7b0ca",
+    "stripped": false,
+    "symbol_source": "readelf -sW (.symtab)",
+    "ps_id_offset_method": "zif_session_id field offsets off ps_globals base: ['0x10']",
+    "symbol_names": {
+      "zval_ptr_dtor": "_zval_ptr_dtor",
+      "zend_mm_safe_error": "zend_mm_safe_error.isra.11",
+      "zend_mm_panic": "zend_mm_panic.constprop.15"
+    },
+    "notes": [
+      "zval_ptr_dtor present as _zval_ptr_dtor (php < 7.3 naming; value recorded under the canonical key)",
+      "MISSING Tier A: zend_reference_destroy"
+    ]
+  },
+  "exploit": {
+    "zval_ptr_dtor": "0x409f4c",
+    "zif_system": "0x33c2f8",
+    "zif_exec": "0x33c2ec",
+    "zif_passthru": "0x33c304",
+    "zif_shell_exec": "0x33cae8",
+    "zend_reference_destroy": null,
+    "zend_array_destroy": "0x42bba4",
+    "ps_globals": "0xa85118",
+    "php_rfc1867_callback": "0xa834b0",
+    "ps_globals_id_offset": "0x10"
+  },
+  "calibration": {
+    "php_session_initialize": "0x2ee604",
+    "php_session_reset_id": "0x2ed9d4",
+    "php_session_create_id": "0x2ecf68",
+    "ps_open_files": "0x2f02f8",
+    "ps_close_files": "0x2f0298",
+    "php_session_abort": null,
+    "php_rshutdown_session_globals": "0x2e8e88",
+    "php_session_rfc1867_callback": "0x2ef674",
+    "php_url_encode": "0x36ccac",
+    "sapi_add_header_ex": "0x3c49d8",
+    "sapi_header_op": "0x3c42fc",
+    "zend_llist_destroy": "0x40d71c",
+    "zend_mm_gc": "0x3f39a4",
+    "zend_mm_free_pages": "0x3f3094",
+    "zend_mm_alloc_pages": "0x3f3d98",
+    "zend_mm_shutdown": "0x3f4e38",
+    "_efree": "0x3f677c",
+    "_emalloc": "0x3f665c",
+    "_erealloc": "0x3f6844",
+    "zend_mm_safe_error": "0x1184d8",
+    "zend_mm_panic": "0x118578",
+    "rfc1867_post_handler": "0x3c5dac",
+    "php_hash_environment": "0x3c9fe8",
+    "php_request_startup": "0x3baa00",
+    "php_request_shutdown": "0x3baeb4",
+    "alloc_globals": "0xa83628",
+    "sapi_globals": "0xa89598",
+    "executor_globals": "0xa89a58",
+    "core_globals": "0xa89308",
+    "compiler_globals": "0xa8a058",
+    "sapi_module": "0xa897b8"
+  },
+  "fingerprint": {
+    "zval_ptr_dtor_mod_0x1000": "0xf4c",
+    "zif_system_mod_0x1000": "0x2f8"
+  }
+}

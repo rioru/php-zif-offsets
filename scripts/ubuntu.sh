@@ -16,9 +16,14 @@
 # Requires: curl, ar, tar (xz/zstd), readelf, python3, jq.
 set -uo pipefail
 cd "$(dirname "$0")/.."
-WORK=work/ubuntu
-ARCH="${ARCH:-x86_64}"   # ELF arch in meta + row filename (aarch64 later)
-DEBUG=work/debuginfo
+ARCH="${ARCH:-x86_64}"
+case "$ARCH" in
+  x86_64)  DEB_ARCH=amd64; POOL="https://archive.ubuntu.com/ubuntu/pool" ;;
+  aarch64) DEB_ARCH=arm64;  POOL="http://ports.ubuntu.com/ubuntu-ports/pool" ;;
+  *) echo "ERROR: unsupported ARCH=$ARCH (x86_64|aarch64)" >&2; exit 1 ;;
+esac
+WORK=work/ubuntu-${ARCH}
+DEBUG=work/debuginfo-${ARCH}
 mkdir -p "$WORK" "$DEBUG" data
 FAILURES=()
 
@@ -57,14 +62,15 @@ build_id_of() { readelf -n "$1" | sed -nE 's/.*Build ID: ([0-9a-f]+).*/\1/p' | h
 for row in "${ROWS[@]}"; do
   IFS='|' read -r suite php uver <<<"$row"
   upver=${uver%%-*}
+  dver="$uver"   # full package version for the row filename
   # pkg|component
   for pc in "libapache2-mod-php${php}|main" "php${php}-fpm|universe"; do
     pkg=${pc%%|*}; comp=${pc##*|}
-    deb="$WORK/${pkg}_${uver}_amd64.deb"
-    dbgdeb="$WORK/${pkg}-dbgsym_${uver}_amd64.ddeb"
-    fetch "https://archive.ubuntu.com/ubuntu/pool/${comp}/p/php${php}/${pkg}_${uver}_amd64.deb" "$deb" ||
+    deb="$WORK/${pkg}_${uver}_${DEB_ARCH}.deb"
+    dbgdeb="$WORK/${pkg}-dbgsym_${uver}_${DEB_ARCH}.ddeb"
+    fetch "${POOL}/${comp}/p/php${php}/${pkg}_${uver}_${DEB_ARCH}.deb" "$deb" ||
       { FAILURES+=("$pkg"); continue; }
-    fetch "http://ddebs.ubuntu.com/pool/${comp}/p/php${php}/${pkg}-dbgsym_${uver}_amd64.ddeb" "$dbgdeb" ||
+    fetch "http://ddebs.ubuntu.com/pool/${comp}/p/php${php}/${pkg}-dbgsym_${uver}_${DEB_ARCH}.ddeb" "$dbgdeb" ||
       { FAILURES+=("$pkg"); continue; }
 
     xdir="$WORK/extract/${pkg}"

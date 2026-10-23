@@ -16,9 +16,14 @@
 # Requires: curl, bsdtar, readelf, python3, jq.
 set -uo pipefail
 cd "$(dirname "$0")/.."
-WORK=work/alpine
-ARCH="${ARCH:-x86_64}"   # ELF arch in meta + row filename (aarch64 later)
-DEBUG=work/debuginfo
+ARCH="${ARCH:-x86_64}"
+case "$ARCH" in
+  x86_64)  APK_ARCH=x86_64 ;;
+  aarch64) APK_ARCH=aarch64 ;;
+  *) echo "ERROR: unsupported ARCH=$ARCH (x86_64|aarch64)" >&2; exit 1 ;;
+esac
+WORK=work/alpine-${ARCH}
+DEBUG=work/debuginfo-${ARCH}
 mkdir -p "$WORK" "$DEBUG" data
 FAILURES=()
 
@@ -45,7 +50,7 @@ COLS=("3.22|83|8.3.36-r0" "3.22|84|8.4.27-r0" "3.18|82|8.2.16-r0" "3.16|81|8.1.2
 for col in "${COLS[@]}"; do
   IFS='|' read -r branch xy aver <<<"$col"
   phpver=${aver%%-*}
-  base="https://dl-cdn.alpinelinux.org/alpine/v${branch}/community/x86_64"
+  base="https://dl-cdn.alpinelinux.org/alpine/v${branch}/community/${APK_ARCH}"
   dbg_apk="$WORK/php${xy}-dbg-${aver}.apk"
   fetch "$base/php${xy}-dbg-${aver}.apk" "$dbg_apk" || { FAILURES+=("php${xy}-dbg"); continue; }
   gdir="$WORK/extract/${branch}-php${xy}-dbg"

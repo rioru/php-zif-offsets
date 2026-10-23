@@ -123,6 +123,22 @@ def get_build_id(path):
     return m.group(1) if m else None
 
 
+# ELF machine of the binary under analysis ("x86_64" or "aarch64"); set in
+# main() from the ELF header and read by every arch-sensitive helper.
+ARCH = "x86_64"
+
+
+def get_arch(path):
+    out = run(["readelf", "-h", str(path)])
+    m = re.search(r"Machine:\s+(.+?)\s*$", out, re.M)
+    if not m:
+        return None
+    return {
+        "Advanced Micro Devices X86-64": "x86_64",
+        "AArch64": "aarch64",
+    }.get(m.group(1).strip())
+
+
 def get_symbols(path):
     """Parse `readelf -sW` into {name: {value, size, type, bind, ndx}}.
 
@@ -207,17 +223,108 @@ def section_bytes(path, sec):
 
 
 def get_relative_relocs(path):
-    """R_X86_64_RELATIVE entries from .rela.dyn/.rela.* as [(r_offset, addend)]."""
+    """R_*_RELATIVE entries from .rela.dyn/.rela.* as [(r_offset, addend)].
+
+    Same readelf output shape on x86_64 (R_X86_64_RELATIVE) and aarch64
+    (R_AARCH64_RELATIVE)."""
     out = run(["readelf", "-rW", str(path)])
     rel = []
     for line in out.splitlines():
         m = re.match(
-            r"^([0-9a-f]+)\s+([0-9a-f]+)\s+R_X86_64_RELATIVE\s+([0-9a-f]+)\s*$",
+            r"^([0-9a-f]+)\s+([0-9a-f]+)\s+R_(?:X86_64|AARCH64)_RELATIVE\s+([0-9a-f]+)\s*$",
             line,
         )
         if m:
             rel.append((int(m.group(1), 16), int(m.group(3), 16)))
     return rel
+
+
+def get_reloc_slots(path, symname):
+    """Addresses of GOT/data slots a dynamic relocation fills with &symname.
+
+    aarch64 shared libraries reach exported data through R_AARCH64_GLOB_DAT
+    or R_AARCH64_ABS64 slots; PIE executables fill their GOT slots with
+    R_AARCH64_RELATIVE whose addend is the symbol's link-time vaddr. The
+    caller passes both the symbol name and its vaddr; RELATIVE addends are
+    matched by value, everything else by name.
+    """
+    out = run(["readelf", "-rW", str(path)])
+    slots = set()
+    for line in out.splitlines():
+        m = re.match(
+            r"^([0-9a-f]+)\s+[0-9a-f]+\s+R_(?:X86_64|AARCH64)_(?:GLOB_DAT|ABS64)\s+[0-9a-f]+\s+(\S+?)(?:@[A-Za-z0-9.]+)?\s+\+",
+            line,
+        )
+        if m and m.group(2) == symname:
+            slots.add(int(m.group(1), 16))
+    return slots
+
+
+# --- aarch64 instruction decoders (raw 4-byte little-endian words) -----------
+
+def decode_adrp(w, addr):
+    """(rd, target_page) for an ADRP, or None. target_page is absolute."""
+    if (w & 0x9F000000) != 0x90000000:
+        return None
+    immlo = (w >> 29) & 0x3
+    immhi = (w >> 5) & 0x7FFFF
+    imm = (immhi << 2) | immlo
+    if imm & (1 << 20):
+        imm -= 1 << 21
+    return (w & 0x1F), (addr & ~0xFFF) + (imm << 12)
+
+
+def decode_add_imm(w):
+    """(rd, rn, imm) for a 64-bit ADD (immediate, shift 0), or None."""
+    if (w & 0xFF800000) != 0x91000000:
+        return None
+    return (w & 0x1F), ((w >> 5) & 0x1F), ((w >> 10) & 0xFFF)
+
+
+def decode_ldr_unsigned(w):
+    """(rt, rn, byte_offset, is_load) for LDR/STR (unsigned offset), or None.
+
+    Covers the integer load/store unsigned-offset family (all sizes).
+    """
+    if (w & 0x3B000000) != 0x39000000:
+        return None
+    scale = (1, 2, 4, 8)[w >> 30]
+    return (
+        w & 0x1F,
+        (w >> 5) & 0x1F,
+        ((w >> 10) & 0xFFF) * scale,
+        bool((w >> 22) & 1),
+    )
+
+
+def aarch64_dest_reg(text):
+    """Destination register number parsed from disassembly text, or None.
+
+    aarch64 operand order puts the destination first for every non-store
+    instruction; stores start with 'st' and write nothing."""
+    parts = text.strip().split()
+    if len(parts) < 2 or parts[0].startswith("st"):
+        return None
+    m = re.match(r"^[xw](\d+),?$", parts[1])
+    return int(m.group(1)) if m else None
+
+
+def aarch64_dest_regs(text):
+    """All destination registers of an instruction, as a list.
+
+    Same convention as aarch64_dest_reg, but LDP writes two registers
+    (e.g. `ldp x19, x20, [sp, #0x10]` in epilogues) and a state machine
+    tracking register contents must invalidate both."""
+    parts = text.strip().split()
+    if len(parts) < 2 or parts[0].startswith("st"):
+        return []
+    operands = parts[1:3] if parts[0] == "ldp" else parts[1:2]
+    out = []
+    for p in operands:
+        m = re.match(r"^[xw](\d+),?$", p)
+        if m:
+            out.append(int(m.group(1)))
+    return out
 
 
 def in_sec(secs, name, vaddr):
@@ -337,15 +444,34 @@ def ps_id_offset_from_dwarf(debug_file):
 
 
 def disasm_range(path, start, stop):
-    """objdump a vaddr range -> [(addr, raw_bytes, text)]."""
-    out = run([
-        "objdump", "-d", f"--start-address={start}", f"--stop-address={stop}", str(path),
-    ])
+    """objdump a vaddr range -> [(addr, raw_bytes, text)].
+
+    x86_64 uses GNU objdump (host toolchain); aarch64 uses llvm-objdump
+    (the host GNU objdump has no aarch64 support). llvm-objdump prints the
+    instruction bytes as a single hex word instead of space-separated
+    pairs, so both shapes are parsed."""
+    if ARCH == "aarch64":
+        out = run([
+            "llvm-objdump", "-d",
+            f"--start-address={start}", f"--stop-address={stop}", str(path),
+        ])
+    else:
+        out = run([
+            "objdump", "-d", f"--start-address={start}", f"--stop-address={stop}", str(path),
+        ])
     insns = []
     for line in out.splitlines():
-        m = re.match(r"\s*([0-9a-f]+):\s*((?:[0-9a-f]{2} )+)\s*(.*?)\s*$", line)
+        m = re.match(r"\s*([0-9a-f]+):\s+((?:[0-9a-f]{2} )+)(.*?)\s*$", line)
         if m:
             insns.append((int(m.group(1), 16), bytes.fromhex(m.group(2)), m.group(3)))
+            continue
+        m = re.match(r"\s*([0-9a-f]+):\s+([0-9a-f]{2,16})\s+(.*?)\s*$", line)
+        if m:
+            # llvm-objdump prints each instruction as its 32-bit value
+            # (big-endian-looking hex word); memory order is the reverse
+            hexw = m.group(2)
+            mem = "".join(hexw[i:i + 2] for i in range(len(hexw) - 2, -2, -2))
+            insns.append((int(m.group(1), 16), bytes.fromhex(mem), m.group(3)))
     return insns
 
 
@@ -362,10 +488,24 @@ def annotation_name(text):
 
 def calls_in_range(path, start, stop):
     """Ordered [(name_or_None, target_addr, insn_offset_from_start)] for
-    direct E8/E9 call/jmp instructions in the vaddr range."""
+    direct call/jmp instructions in the vaddr range.
+
+    x86_64: E8/E9 rel32. aarch64: BL and unconditional B (imm26) - the
+    counterparts of call and jmp/tail-call; intra-function conditional
+    branches (b.cond/cbz/tbz) stay fixed, mirroring the x86 treatment of
+    short jcc."""
     out = []
     for addr, b, text in disasm_range(path, start, stop):
-        if len(b) == 5 and b[0] in (0xE8, 0xE9):
+        if ARCH == "aarch64":
+            if len(b) != 4:
+                continue
+            w = int.from_bytes(b, "little")
+            if (w & 0xFC000000) in (0x94000000, 0x14000000):
+                imm26 = w & 0x03FFFFFF
+                if imm26 & (1 << 25):
+                    imm26 -= 1 << 26
+                out.append((annotation_name(text), addr + 4 * imm26, addr - start))
+        elif len(b) == 5 and b[0] in (0xE8, 0xE9):
             rel = int.from_bytes(b[1:5], "little", signed=True)
             out.append((annotation_name(text), addr + 5 + rel, addr - start))
     return out
@@ -374,11 +514,23 @@ def calls_in_range(path, start, stop):
 def build_masked_pattern(insns):
     """Masked byte pattern + call sites from reference instructions.
 
-    Wildcards: rel32 fields of E8/E9 (call/jmp) and the disp32 of
-    rip-relative operands. Everything else must match byte-for-byte.
+    Wildcards are per-build-varying fields; everything else must match
+    byte-for-byte. Pattern entries: int (fixed byte), None (wildcard
+    byte), or (value, mask) tuple (partially fixed byte).
+
+    x86_64: rel32 fields of E8/E9 (call/jmp) and the disp32 of
+    rip-relative operands.
+
+    aarch64: BL/B imm26, ADRP imm21, LDR-literal imm19, and the imm12 of
+    the ADD/LDR that completes an ADRP (the GOT-slot offset / lo12 half
+    of a global's address varies across builds exactly like a rip disp32
+    does). Intra-function conditional branches stay fixed.
+
     Returns (pattern, calls) with calls = [(insn_offset, ref_target,
     ref_name)].
     """
+    if ARCH == "aarch64":
+        return build_masked_pattern_aarch64(insns)
     pattern = []
     calls = []
     func_start = insns[0][0]
@@ -397,26 +549,79 @@ def build_masked_pattern(insns):
     return pattern, calls
 
 
+def build_masked_pattern_aarch64(insns):
+    words = [int.from_bytes(b, "little") for _, b, _ in insns]
+    n = len(insns)
+    # imm12 of the ADD/LDR completing an ADRP varies across builds
+    mask_imm12 = [False] * n
+    for i in range(n):
+        ad = decode_adrp(words[i], insns[i][0])
+        if not ad:
+            continue
+        rd = ad[0]
+        for j in range(i + 1, min(i + 4, n)):
+            add = decode_add_imm(words[j])
+            if add and add[1] == rd:
+                mask_imm12[j] = True
+                break
+            ldr = decode_ldr_unsigned(words[j])
+            if ldr and ldr[1] == rd:
+                mask_imm12[j] = True
+                break
+            if aarch64_dest_reg(insns[j][2]) == rd:
+                break
+    pattern = []
+    calls = []
+    func_start = insns[0][0]
+    for i, (addr, b, text) in enumerate(insns):
+        off = addr - func_start
+        w = words[i]
+        if (w & 0xFC000000) in (0x94000000, 0x14000000):  # BL / B
+            imm26 = w & 0x03FFFFFF
+            if imm26 & (1 << 25):
+                imm26 -= 1 << 26
+            calls.append((off, addr + 4 * imm26, annotation_name(text)))
+            pattern.extend([None, None, None, (b[3] & 0xFC, 0xFC)])
+        elif (w & 0x9F000000) == 0x90000000:  # ADRP: keep op, 10000, Rd
+            pattern.extend([(b[0] & 0x1F, 0x1F), None, None, (b[3] & 0x9F, 0x9F)])
+        elif (w & 0xBF000000) == 0x18000000:  # LDR literal: keep opc/V, Rt
+            pattern.extend([(b[0] & 0x1F, 0x1F), None, None, b[3]])
+        elif mask_imm12[i] and decode_add_imm(w):  # ADD imm12 (post-ADRP)
+            pattern.extend([b[0], (b[1] & 0x03, 0x03), None, b[3]])
+        elif mask_imm12[i] and decode_ldr_unsigned(w):  # LDR/STR imm12 (post-ADRP)
+            pattern.extend([b[0], (b[1] & 0x03, 0x03), (b[2] & 0xC0, 0xC0), b[3]])
+        else:
+            pattern.extend(b)
+    return pattern, calls
+
+
 def search_masked(blob, base_addr, pattern):
-    """Addresses in blob (mapped at base_addr) matching the masked pattern."""
+    """Addresses in blob (mapped at base_addr) matching the masked pattern.
+
+    Fixed positions must match byte-for-byte; (value, mask) tuples match
+    on the masked bits."""
     hits = []
     n = len(pattern)
-    first_fixed = next((i for i, p in enumerate(pattern) if p is not None), None)
-    if first_fixed is None:
-        return hits
     fixed_idx = [i for i, p in enumerate(pattern) if p is not None]
-    i = blob.find(bytes([pattern[first_fixed]]))
-    # simple scan anchored on the first fixed byte
+    first_fixed = next((i for i in fixed_idx if not isinstance(pattern[i], tuple)), None)
+    if first_fixed is None and not fixed_idx:
+        return hits
+    anchor = pattern[first_fixed] if first_fixed is not None else None
     pos = 0
     while True:
-        i = blob.find(bytes([pattern[first_fixed]]), pos)
+        i = blob.find(bytes([anchor]), pos) if anchor is not None else pos
         if i == -1 or i + n > len(blob):
             break
-        cand = i - first_fixed
-        if cand >= 0:
+        cand = i - first_fixed if first_fixed is not None else pos
+        if 0 <= cand and cand + n <= len(blob):
             ok = True
-            for j, k in enumerate(fixed_idx):
-                if blob[cand + k] != pattern[k]:
+            for k in fixed_idx:
+                p = pattern[k]
+                if isinstance(p, tuple):
+                    if (blob[cand + k] & p[1]) != p[0]:
+                        ok = False
+                        break
+                elif blob[cand + k] != p:
                     ok = False
                     break
             if ok:
@@ -523,11 +728,83 @@ def recover_via_caller(target, secs, target_syms, ref, ref_syms, name, anchor, a
     return None, f"ambiguous answers: {[hex(a) for a in answers]}"
 
 
+def php_version_tuple(v):
+    """(major, minor) from a package version string, or None."""
+    m = re.match(r"(\d+)\.(\d+)", v or "")
+    return (int(m.group(1)), int(m.group(2))) if m else None
+
+
+def read_u64_at(path, secs, vaddr):
+    """Raw 8-byte little-endian value stored at vaddr, or None.
+
+    RELR-packed builds (-z pack-relative-relocs, e.g. Fedora fc42+) carry
+    no R_AARCH64_RELATIVE addends: relocated data slots hold the link-time
+    value directly in the file."""
+    for sec in secs.values():
+        if sec["addr"] <= vaddr < sec["addr"] + sec["size"] and sec["type"] != "NOBITS":
+            with open(path, "rb") as f:
+                f.seek(vaddr - sec["addr"] + sec["off"])
+                b = f.read(8)
+            return int.from_bytes(b, "little") if len(b) == 8 else None
+    return None
+
+
+def recover_via_rc_dtor_table(binary, secs, syms):
+    """aarch64: destructors from rc_dtor_func's jump table.
+
+    rc_dtor_func loads a 16-entry function-pointer table (indexed by the
+    zval type & 0xf, 8 bytes per entry) and tail-jumps through it. In PIE
+    builds the entries are R_AARCH64_RELATIVE relocation addends (or, in
+    RELR-packed builds, plain link-time vaddrs stored in the file), so the
+    table read recovers them without a reference build. Returns
+    ({name: vaddr}, why) - the caller applies the php-version guards
+    (zend_array_destroy exists from 7.0, zend_reference_destroy from 7.3).
+    """
+    if ARCH != "aarch64":
+        return {}, "implemented for aarch64 only"
+    sym = syms.get("rc_dtor_func")
+    if not sym:
+        return {}, "rc_dtor_func not in symbol tables"
+    insns = disasm_range(binary, sym["value"], sym["value"] + 64)
+    base = None
+    for i, (addr, b, text) in enumerate(insns):
+        if len(b) != 4:
+            continue
+        ad = decode_adrp(int.from_bytes(b, "little"), addr)
+        if not ad:
+            continue
+        for j in (i + 1, i + 2):
+            if j >= len(insns) or len(insns[j][1]) != 4:
+                continue
+            add = decode_add_imm(int.from_bytes(insns[j][1], "little"))
+            if add and add[0] == ad[0] and add[1] == ad[0]:
+                base = ad[1] + add[2]
+                break
+        if base is not None:
+            break
+    if base is None:
+        return {}, "jump-table base not found in rc_dtor_func"
+    slots = dict(get_relative_relocs(binary))
+    out = {}
+    for name, idx in (("zend_array_destroy", 7), ("zend_reference_destroy", 10)):
+        slot = base + idx * 8
+        addend = slots.get(slot)
+        if addend is None:
+            addend = read_u64_at(binary, secs, slot)
+        if addend and in_sec(secs, ".text", addend):
+            out[name] = addend
+    return out, f"rc_dtor_func jump table (base {hex(base)}, slot relocs/raw slots)"
+
+
 def recover_via_storelea(target, secs, var_addr):
     """Recover the function assigned to a function-pointer variable in a
-    MINIT-style `var = func;`: the PIE code does `lea var(%rip),%rX` then
-    `lea func(%rip),%rY` and stores. Find lea-to-var sites whose window
-    stores through the pointer; the nearby lea-to-.text target is func."""
+    MINIT-style `var = func;`.
+
+    x86_64 PIE: `lea var(%rip),%rX` then `lea func(%rip),%rY` and stores.
+    aarch64: `adrp+add` computing &var, a store through it, and a nearby
+    `adrp+add` computing the .text target."""
+    if ARCH == "aarch64":
+        return recover_via_storelea_aarch64(target, secs, var_addr)
     text = secs.get(".text")
     if not text or not var_addr:
         return None, "no .text or var address"
@@ -568,6 +845,54 @@ def recover_via_storelea(target, secs, var_addr):
     return None, f"no unique assignment candidate ({len(candidates)})"
 
 
+def recover_via_storelea_aarch64(target, secs, var_addr):
+    text = secs.get(".text")
+    if not text or not var_addr:
+        return None, "no .text or var address"
+    blob = section_bytes(target, text)
+    candidates = set()
+    n = len(blob)
+    for i in range(0, n - 16, 4):
+        ad = decode_adrp(int.from_bytes(blob[i:i + 4], "little"), text["addr"] + i)
+        if not ad:
+            continue
+        rd, page = ad
+        for j in range(i + 4, min(i + 16, n), 4):
+            add = decode_add_imm(int.from_bytes(blob[j:j + 4], "little"))
+            if not add or add[1] != rd:
+                continue
+            if page + add[2] != var_addr:
+                break
+            # &var established in rd; window around the assignment site
+            site = text["addr"] + i
+            insns = disasm_range(target, site - 16, site + 96)
+            m = len(insns)
+            stores = any(
+                (lambda l: l and l[1] == rd and not l[3])(decode_ldr_unsigned(int.from_bytes(b2, "little")))
+                for _, b2, _ in insns
+            )
+            if not stores:
+                break
+            for k in range(m):
+                ad2 = decode_adrp(int.from_bytes(insns[k][1], "little"), insns[k][0])
+                if not ad2:
+                    continue
+                rd2, page2 = ad2
+                for k2 in range(k + 1, min(k + 4, m)):
+                    add2 = decode_add_imm(int.from_bytes(insns[k2][1], "little"))
+                    if add2 and add2[1] == rd2:
+                        cand = page2 + add2[2]
+                        if in_sec(secs, ".text", cand):
+                            candidates.add(cand)
+                        break
+            break
+        # (no writes_reg tracking in the raw scan: a stale-base ADD can only
+        #  match var_addr by numeric coincidence)
+    if len(candidates) == 1:
+        return candidates.pop(), f"adrp/add/store assignment into {hex(var_addr)}"
+    return None, f"no unique assignment candidate ({len(candidates)})"
+
+
 def disasm_1(path, addr):
     insns = disasm_range(path, addr, addr + 16)
     return insns[0][2] if insns else None
@@ -599,15 +924,38 @@ def recover_via_ps_module(target, secs, rel, mod_str="files"):
 
 def recover_alloc_globals(target, secs, target_syms):
     """alloc_globals is a static struct; every allocator entry loads
-    AG(mm_heap) through a rip-relative access to &alloc_globals as its
-    first instruction. Cross-check _emalloc/_efree/_erealloc."""
+    AG(mm_heap) as its first data access.
+
+    x86_64: rip-relative mov to &alloc_globals. aarch64: adrp + ldr
+    (unsigned offset) whose computed address is &alloc_globals.
+    Cross-check _emalloc/_efree/_erealloc."""
     candidates = {}
     for fname in ("_emalloc", "_efree", "_erealloc"):
         sym = target_syms.get(fname)
         if not sym or sym["size"] == 0:
             continue
-        insns = disasm_range(target, sym["value"], sym["value"] + min(sym["size"], 32))
-        for addr, b, text in insns[:4]:
+        insns = disasm_range(target, sym["value"], sym["value"] + min(sym["size"], 48))
+        limit = 8 if ARCH == "aarch64" else 4
+        for idx, (addr, b, text) in enumerate(insns[:limit]):
+            if ARCH == "aarch64":
+                ad = decode_adrp(int.from_bytes(b, "little"), addr)
+                if not ad:
+                    continue
+                rd, page = ad
+                found = False
+                for j in range(idx + 1, min(idx + 4, len(insns))):
+                    ldr = decode_ldr_unsigned(int.from_bytes(insns[j][1], "little"))
+                    if ldr and ldr[1] == rd:
+                        tgt = page + ldr[2]
+                        if in_sec(secs, ".data", tgt) or in_sec(secs, ".bss", tgt):
+                            candidates.setdefault(tgt, []).append(fname)
+                            found = True
+                        break
+                    if aarch64_dest_reg(insns[j][2]) == rd:
+                        break
+                if found:
+                    break
+                continue
             m = re.match(r"mov\s+(?:0x[0-9a-f]+)?\(%rip\),%\w+", text)
             if not m:
                 continue
@@ -625,7 +973,9 @@ def recover_alloc_globals(target, secs, target_syms):
             break
     if len(candidates) == 1:
         tgt, srcs = next(iter(candidates.items()))
-        return tgt, f"rip-relative AG(mm_heap) load in {','.join(srcs)}"
+        how = ("ADRP+LDR" if ARCH == "aarch64" else "rip-relative") + \
+            f" AG(mm_heap) load in {','.join(srcs)}"
+        return tgt, how
     return None, f"ambiguous candidates: { {hex(k): v for k, v in candidates.items()} }"
 
 
@@ -702,6 +1052,83 @@ def ps_id_offset_from_disasm(path, syms, secs):
     return (sorted(set(disps)) if disps else None), base_reg
 
 
+def ps_id_offsets_aarch64(path, secs, ps_vaddr, start=None, stop=None):
+    """Field offsets accessed off &ps_globals, from ADRP/ADD/LDR decoding.
+
+    Single-pass register-state machine: a register either holds an ADRP
+    page base (GOT) or &ps_globals (PS). PS is established by a direct
+    ADRP+ADD computing ps_vaddr, or by any load of a ps_globals GOT slot
+    (R_AARCH64_GLOB_DAT / R_AARCH64_ABS64 by name, or R_AARCH64_RELATIVE
+    with addend == ps_vaddr - PIE executables) off a register currently
+    holding that slot's page base. The page base is tracked persistently,
+    not just within a fixed ADRP+LDR window, because compilers re-use and
+    re-establish the base mid-function: `ldrb w0,[x0,#off]` clobbers x0,
+    then `ldr x0,[x20,#slot]` re-loads it off the x20 page base that was
+    established much earlier. Any LDR/STR (unsigned offset) off a PS
+    register records the field offset; a register stops counting as soon
+    as any other instruction writes it. Whole-.text scan, or restricted
+    to a function range."""
+    text = secs.get(".text")
+    if not text:
+        return []
+    if start is None:
+        start, stop = text["addr"], text["addr"] + text["size"]
+    slots = get_reloc_slots(path, "ps_globals")
+    for off, addend in get_relative_relocs(path):
+        if addend == ps_vaddr:
+            slots.add(off)
+    # RELR-packed builds (-z pack-relative-relocs, e.g. Fedora fc41+) keep
+    # no R_AARCH64_RELATIVE entries for their GOT slots: the slot's
+    # link-time value is simply stored in-file. Scan the pointer sections
+    # for it as a fallback (non-RELR binaries hold 0 there pre-relocation,
+    # so this only ever adds genuine slots).
+    for name in (".got", ".data.rel.ro"):
+        sec = secs.get(name)
+        if not sec or sec["type"] == "NOBITS":
+            continue
+        blob = section_bytes(path, sec)
+        for i in range(0, len(blob) - 7, 8):
+            if struct.unpack_from("<Q", blob, i)[0] == ps_vaddr:
+                slots.add(sec["addr"] + i)
+    insns = disasm_range(path, start, stop)
+
+    GOT, PS = 0, 1
+    reg = {}  # regnum -> (GOT, page) | (PS, None)
+    offs = set()
+    for addr, b, t in insns:
+        if len(b) != 4:
+            continue
+        w = int.from_bytes(b, "little")
+        ad = decode_adrp(w, addr)
+        if ad:
+            reg[ad[0]] = (GOT, ad[1])
+            continue
+        add = decode_add_imm(w)
+        if add:
+            rd, rn, imm = add
+            st = reg.get(rn)
+            if st and st[0] == GOT and st[1] + imm == ps_vaddr:
+                reg[rd] = (PS, None)
+            else:
+                reg.pop(rd, None)
+            continue
+        ls = decode_ldr_unsigned(w)
+        if ls:
+            rt, rn, off, is_load = ls
+            st = reg.get(rn)
+            if is_load and st and st[0] == GOT and st[1] + off in slots:
+                reg[rt] = (PS, None)
+            else:
+                if st and st[0] == PS:
+                    offs.add(off)
+                if is_load:
+                    reg.pop(rt, None)
+            continue
+        for d in aarch64_dest_regs(t):
+            reg.pop(d, None)
+    return sorted(offs)
+
+
 def hexs(v):
     return None if v is None else hex(v)
 
@@ -739,6 +1166,16 @@ def main():
     secs = get_sections(binary)
     build_id = get_build_id(binary)
     has_symtab = ".symtab" in secs
+    detected_arch = get_arch(binary)
+    if detected_arch is None:
+        sys.exit(f"unsupported ELF machine for {binary} (need x86_64 or aarch64)")
+    global ARCH
+    ARCH = detected_arch
+    if meta.get("arch") and meta["arch"] != ARCH:
+        notes.append(
+            f"meta arch {meta['arch']} disagrees with the ELF header ({ARCH}); "
+            "recorded value follows the ELF header"
+        )
     # readelf -sW dumps every symbol table (.dynsym first, then .symtab).
     # Stripped docker fpm/cli binaries are -rdynamic: .dynsym still exports
     # ~2400 defined globals (all data symbols, most functions) - only the
@@ -829,6 +1266,30 @@ def main():
                 if tag not in (symbol_source or ""):
                     symbol_source = (symbol_source + " + " + tag).strip(" +")
 
+    # rc_dtor_func jump-table walk (aarch64): the refcounted-destructor
+    # dispatcher reaches its targets through a 16-entry function-pointer
+    # table indexed by the zval type (& 0xf); PIE builds fill the entries
+    # with R_AARCH64_RELATIVE relocations whose addends are the destructors
+    # (entry[IS_ARRAY=7] = zend_array_destroy, entry[IS_REFERENCE=10] =
+    # zend_reference_destroy). Needs no reference build and bridges
+    # codegen changes (e.g. pointer authentication) that break the
+    # masked-pattern rung.
+    if ARCH == "aarch64" and (
+        exploit.get("zend_array_destroy") is None
+        or (exploit.get("zend_reference_destroy") is None and php_version_tuple(meta["php_version"]) >= (7, 3))
+    ):
+        found, why = recover_via_rc_dtor_table(binary, secs, syms)
+        for name, hit in found.items():
+            if name == "zend_reference_destroy" and php_version_tuple(meta["php_version"]) < (7, 3):
+                continue
+            if exploit.get(name) is None:
+                exploit[name] = hexs(hit)
+                notes.append(f"{name} recovered via {why}")
+                if "rc_dtor jump-table" not in (symbol_source or ""):
+                    symbol_source = (symbol_source + " + rc_dtor jump-table (.rela.dyn)").strip(" +")
+        if not found:
+            notes.append(f"rc_dtor_func jump-table walk failed: {why}")
+
     # Recovery pass for LOCAL symbols absent from every available table.
     # Methods, in order of trust:
     #   - masked byte-pattern match vs an unstripped same-version build
@@ -918,6 +1379,26 @@ def main():
     if dwarf_off is not None:
         ps_id_offset = dwarf_off
         ps_id_method = "pahole php_ps_globals (DWARF)"
+    elif ARCH == "aarch64":
+        ps_v = exploit.get("ps_globals")
+        offs = []
+        if ps_v:
+            ps_vaddr = int(ps_v, 16)
+            zsym = syms.get("zif_session_id")
+            if has_symtab and zsym and zsym["size"]:
+                offs = ps_id_offsets_aarch64(
+                    binary, secs, ps_vaddr, zsym["value"], zsym["value"] + zsym["size"])
+                ps_id_method = f"zif_session_id field offsets off ps_globals base: {[hex(o) for o in offs]}"
+            else:
+                offs = ps_id_offsets_aarch64(binary, secs, ps_vaddr)
+                ps_id_method = f"whole-.text ps_globals-base field offsets: {[hex(o) for o in offs]}"
+        if offs:
+            if EXPECTED_PS_ID in offs:
+                ps_id_offset = EXPECTED_PS_ID
+            else:
+                notes.append(f"PS(id) offset NOT the expected +0x10 (accessed offsets: {[hex(o) for o in offs]}) - verify against DWARF")
+        else:
+            notes.append("ps_globals_id_offset recovery failed: no ps_globals-relative accesses found by the aarch64 ADRP/LDR scan" + ("" if ps_v else " (ps_globals itself missing)"))
     elif has_symtab:
         disps, base = ps_id_offset_from_disasm(binary, syms, secs)
         if disps:
@@ -992,7 +1473,7 @@ def main():
         "meta": {
             "php_version": meta["php_version"],
             "thread_safety": meta.get("thread_safety"),
-            "arch": meta.get("arch", "x86_64"),
+            "arch": ARCH,
             "distro": meta["distro"],
             "package": meta["package"],
             "binary_path": meta["binary_path"],
